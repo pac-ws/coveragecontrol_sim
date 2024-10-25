@@ -1,0 +1,42 @@
+launch:
+  - arg:
+      name: 'params_file'
+  - arg:
+      name: 'pos_file'
+  - arg:
+      name: 'idf_file'
+  - arg:
+      name: 'namespaces_of_robots'
+  - arg:
+      name: 'sim_namespace'
+      default: 'sim'
+  - arg:
+      name: 'scale_factor'
+      default: '1.0'
+  - arg:
+      name: 'mode'
+      default: 'sim'
+  - arg:
+      name: 'offset_x'
+      default: '0.0'
+  - arg:
+      name: 'offset_y'
+      default: '0.0'
+
+  - node:
+      pkg: 'coveragecontrol_sim'
+      exec: 'sim_centralized'
+      namespace: '$(var sim_namespace)'
+      param:
+        - name: 'params_file'
+          value: '$(var params_file)'
+        - name: 'pos_file'
+          value: '$(var pos_file)'
+        - name: 'idf_file'
+          value: '$(var idf_file)'
+        - name: 'namespaces_of_robots'
+          value: '$(var namespaces_of_robots)'
+        - name: 'scale_factor'
+          value: '$(var scale_factor)'
+        - name: 'mode'
+          value: '$(var mode)'
