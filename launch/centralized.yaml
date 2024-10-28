@@ -2,8 +2,6 @@ launch:
   - arg:
       name: 'params_file'
   - arg:
-      name: 'pos_file'
-  - arg:
       name: 'idf_file'
   - arg:
       name: 'namespaces_of_robots'
@@ -30,8 +28,6 @@ launch:
       param:
         - name: 'params_file'
           value: '$(var params_file)'
-        - name: 'pos_file'
-          value: '$(var pos_file)'
         - name: 'idf_file'
           value: '$(var idf_file)'
         - name: 'namespaces_of_robots'

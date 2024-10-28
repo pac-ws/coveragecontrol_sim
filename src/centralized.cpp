@@ -3,16 +3,8 @@
 namespace CoverageControlSim {
 
   void CoverageControlSimCentralized::CreateSimCentralizedSetup() {
-    if (pos_file_ != "" && idf_file_ != "") {
+    if (idf_file_ != "") {
       // Check if the files exist
-      if (rcpputils::fs::exists(pos_file_)) {
-        RCLCPP_INFO(this->get_logger(), "Reading pos file %s",
-                    pos_file_.c_str());
-      } else {
-        RCLCPP_ERROR(this->get_logger(), "Pos file %s does not exist",
-                     pos_file_.c_str());
-        rclcpp::shutdown();
-      }
       if (rcpputils::fs::exists(idf_file_)) {
         RCLCPP_INFO(this->get_logger(), "Reading IDF file %s",
                     idf_file_.c_str());
@@ -23,11 +15,11 @@ namespace CoverageControlSim {
       }
       WorldIDF world_idf(parameters_, idf_file_);
       parameters_.pNumFeatures = world_idf.GetNumFeatures();
+      CoverageControl::PointVector robot_positions(parameters_.pNumRobots);
       coverage_system_ptr_ =
-          std::make_shared<CoverageSystem>(parameters_, world_idf, pos_file_);
-      parameters_.pNumRobots = coverage_system_ptr_->GetNumRobots();
+          std::make_shared<CoverageSystem>(parameters_, world_idf, robot_positions);
     } else {
-      RCLCPP_ERROR(this->get_logger(), "pos_file or idf_file is empty.");
+      RCLCPP_ERROR(this->get_logger(), "idf_file is empty.");
     }
     RCLCPP_INFO(this->get_logger(), "Created coverage system");
   }

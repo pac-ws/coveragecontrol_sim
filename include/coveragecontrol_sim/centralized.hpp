@@ -45,7 +45,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   PointVector world_robot_positions_;  // Actual robot positions in the world
   PointVector sim_robot_positions_;  // Scaled robot positions in the simulation
 
-  std::string params_file_, pos_file_, idf_file_;
+  std::string params_file_, idf_file_;
 
   rmw_qos_profile_t qos_profile_sensor_data_ = rmw_qos_profile_sensor_data;
   rclcpp::QoS qos = rclcpp::QoS(rclcpp::QoSInitialization(
@@ -146,7 +146,6 @@ class CoverageControlSimCentralized : public rclcpp::Node {
             ament_index_cpp::get_package_prefix("coveragecontrol_sim")) {
     params_file_ = this->declare_parameter<std::string>("params_file");
     parameters_ = Parameters(params_file_);
-    pos_file_ = this->declare_parameter<std::string>("pos_file");
     idf_file_ = this->declare_parameter<std::string>("idf_file");
     scale_factor_ = this->declare_parameter<double>("scale_factor", 1);
     mode_ = this->declare_parameter<std::string>("mode", "sim");
@@ -236,21 +235,21 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     coverage_system_ptr_ = std::make_shared<CoverageSystem>(
         parameters_, world_idf, sim_robot_positions_);
 
-    CreateRobotPosPublishers();
+    // CreateRobotPosPublishers();
 
-    CreateRobotSimPosPublishers();
+    // CreateRobotSimPosPublishers();
 
-    CreateRobotMapPublishers();
+    // CreateRobotMapPublishers();
     /* CreateRobotLocalMapPublishers(); */
     /* CreateObstacleMapsPublisher(); */
     CreateSystemMapPublisher();
     CreateGlobalMapPublisher();
     /* CreateExploredIDFMapPublisher(); */
-    CreateSensorViewPublisher();
+    // CreateSensorViewPublisher();
     RCLCPP_INFO(this->get_logger(), "Created map publishers");
 
-    CreateNeigborsPosPublisher();
-    CreateNeigborsIDPublisher();
+    // CreateNeigborsPosPublisher();
+    // CreateNeigborsIDPublisher();
     RCLCPP_INFO(this->get_logger(), "Created neighbors publishers");
 
     CreateAllRobotsPosesPublisher();
