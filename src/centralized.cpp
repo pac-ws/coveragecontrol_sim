@@ -4,22 +4,26 @@
 namespace CoverageControlSim {
 
 void CoverageControlSimCentralized::CreateServiceServers() {
-  namespaces_robots_service_ = this->create_service<
-      async_pac_gnn_interfaces::srv::NamespacesRobots>(
-      "namespaces_robots",
-      [this](const std::shared_ptr<async_pac_gnn_interfaces::srv::NamespacesRobots::Request> request,
-         std::shared_ptr<async_pac_gnn_interfaces::srv::NamespacesRobots::Response>
+  world_map_service_ = this->create_service<
+      async_pac_gnn_interfaces::srv::WorldMap>(
+      "get_world_map",
+      [this](const std::shared_ptr<async_pac_gnn_interfaces::srv::WorldMap::Request> request,
+         std::shared_ptr<async_pac_gnn_interfaces::srv::WorldMap::Response>
              response) {
         RCLCPP_INFO(this->get_logger(),
-                    "Incoming request\nnum_robots: %ld", request->num_robots);
-        if(request->num_robots != namespaces_of_robots_.size()) {
+                    "Incoming request\nmap_size: %d", request->map_size);
+        if(request->map_size != parameters_.pWorldMapSize) {
           response->success = false;
-          response->namespaces = {};
+          response->map = EigenMatrixRowMajorToFloat32MultiArray(
+              Eigen::MatrixXf::Zero(parameters_.pWorldMapSize,
+                                    parameters_.pWorldMapSize));
           RCLCPP_ERROR(this->get_logger(),
-                       "Number of robots does not match");
+                       "World map size does not match with the system");
         } else {
           response->success = true;
-          response->namespaces = namespaces_of_robots_;
+          response->map = EigenMatrixRowMajorToFloat32MultiArray(
+              coverage_system_ptr_->GetWorldMap());
+          RCLCPP_INFO(this->get_logger(), "World map sent");
         }
       });
 }

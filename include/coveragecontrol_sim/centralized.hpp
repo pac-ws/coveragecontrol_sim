@@ -7,7 +7,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <ament_index_cpp/get_package_prefix.hpp>
-#include <async_pac_gnn_interfaces/srv/namespaces_robots.hpp>
+#include <async_pac_gnn_interfaces/srv/world_map.hpp>
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
 #include <functional>
@@ -159,24 +159,16 @@ class CoverageControlSimCentralized : public rclcpp::Node {
         "namespaces_of_robots", std::vector<std::string>());
     if (namespaces_of_robots_.size() !=
         static_cast<size_t>(parameters_.pNumRobots)) {
-      if (mode_ == "sim") {
-        RCLCPP_WARN(this->get_logger(),
-                    "Number of robot namespaces does not match number of "
-                    "robots: %ld vs %d",
-                    namespaces_of_robots_.size(), parameters_.pNumRobots);
-        RCLCPP_WARN(this->get_logger(),
-                    "Creating robot namespaces with default names");
-        namespaces_of_robots_.clear();
-        for (int i = 0; i < parameters_.pNumRobots; ++i) {
-          namespaces_of_robots_.push_back("robot" + std::to_string(i));
-        }
-      } else {
-        RCLCPP_ERROR(this->get_logger(),
-                     "Number of robot namespaces does not match number of "
-                     "robots: %ld vs %d",
-                     namespaces_of_robots_.size(), parameters_.pNumRobots);
-        return;
-      }
+      RCLCPP_WARN(this->get_logger(),
+                  "Number of robot namespaces does not match number of "
+                  "robots in coveragecontrol.toml. This is not a problem. FYI: "
+                  "%ld vs %d",
+                  namespaces_of_robots_.size(), parameters_.pNumRobots);
+      RCLCPP_WARN(this->get_logger(),
+                  "Forcing number of robots to number of items in "
+                  "namespaces_of_robots: %ld",
+                  namespaces_of_robots_.size());
+      parameters_.pNumRobots = namespaces_of_robots_.size();
     }
 
     buffer_size_ = this->declare_parameter<int>("buffer_size", 10);
@@ -272,8 +264,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   Parameters const &GetParameters() { return parameters_; }
 
  private:
-  rclcpp::Service<async_pac_gnn_interfaces::srv::NamespacesRobots>::SharedPtr
-      namespaces_robots_service_;
+  rclcpp::Service<async_pac_gnn_interfaces::srv::WorldMap>::SharedPtr
+      world_map_service_;
 
   void CreateServiceServers();
 
