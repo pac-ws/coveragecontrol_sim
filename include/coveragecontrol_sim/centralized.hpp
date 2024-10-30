@@ -7,6 +7,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <ament_index_cpp/get_package_prefix.hpp>
+#include <async_pac_gnn_interfaces/srv/namespaces_robots.hpp>
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
 #include <functional>
@@ -38,7 +39,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   Parameters parameters_;
   double time_step_ = 0.1;
   int buffer_size_ = 10;
-  double scale_factor_;
+  double env_scale_factor_;
+  double vel_scale_factor_;
   std::string mode_;
   int robot_id_ = 0;
 
@@ -48,8 +50,10 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   std::string params_file_, idf_file_;
 
   rmw_qos_profile_t qos_profile_sensor_data_ = rmw_qos_profile_sensor_data;
-  rclcpp::QoS qos = rclcpp::QoS(rclcpp::QoSInitialization(
-      qos_profile_sensor_data_.history, qos_profile_sensor_data_.depth), qos_profile_sensor_data_);
+  rclcpp::QoS qos =
+      rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_sensor_data_.history,
+                                            qos_profile_sensor_data_.depth),
+                  qos_profile_sensor_data_);
   std::vector<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr>
       world_pos_subs_;
   rclcpp::CallbackGroup::SharedPtr cbg_world_pos_sub_;
@@ -147,7 +151,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     params_file_ = this->declare_parameter<std::string>("params_file");
     parameters_ = Parameters(params_file_);
     idf_file_ = this->declare_parameter<std::string>("idf_file");
-    scale_factor_ = this->declare_parameter<double>("scale_factor", 1);
+    env_scale_factor_ = this->declare_parameter<double>("env_scale_factor", 1);
+    vel_scale_factor_ = this->declare_parameter<double>("vel_scale_factor", 1);
     mode_ = this->declare_parameter<std::string>("mode", "sim");
 
     namespaces_of_robots_ = this->declare_parameter<std::vector<std::string>>(
@@ -155,10 +160,10 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     if (namespaces_of_robots_.size() !=
         static_cast<size_t>(parameters_.pNumRobots)) {
       if (mode_ == "sim") {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "Number of robot namespaces does not match number of robots: %ld vs %d",
-            namespaces_of_robots_.size(), parameters_.pNumRobots);
+        RCLCPP_WARN(this->get_logger(),
+                    "Number of robot namespaces does not match number of "
+                    "robots: %ld vs %d",
+                    namespaces_of_robots_.size(), parameters_.pNumRobots);
         RCLCPP_WARN(this->get_logger(),
                     "Creating robot namespaces with default names");
         namespaces_of_robots_.clear();
@@ -166,10 +171,10 @@ class CoverageControlSimCentralized : public rclcpp::Node {
           namespaces_of_robots_.push_back("robot" + std::to_string(i));
         }
       } else {
-        RCLCPP_ERROR(
-            this->get_logger(),
-            "Number of robot namespaces does not match number of robots: %ld vs %d",
-            namespaces_of_robots_.size(), parameters_.pNumRobots);
+        RCLCPP_ERROR(this->get_logger(),
+                     "Number of robot namespaces does not match number of "
+                     "robots: %ld vs %d",
+                     namespaces_of_robots_.size(), parameters_.pNumRobots);
         return;
       }
     }
@@ -198,15 +203,17 @@ class CoverageControlSimCentralized : public rclcpp::Node {
               "/" + namespaces_of_robots_[i] + "/pose",
               /* rclcpp::QoS(buffer_size_), */
               qos,
-              [this, i, &received_pos](
-                  geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+              [this, i,
+               &received_pos](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
                 world_robot_positions_[i] =
                     Point2(msg->pose.position.x, msg->pose.position.y);
-                sim_robot_positions_[i] = world_robot_positions_[i] * scale_factor_;
+                sim_robot_positions_[i] =
+                    world_robot_positions_[i] * env_scale_factor_;
                 if (coverage_system_ptr_ == nullptr) {
                   received_pos.insert(i);
                 } else {
-                    /* RCLCPP_INFO(this->get_logger(), "received pose (%f, %f)", sim_robot_positions_[i][0], sim_robot_positions_[i][1]); */
+                  /* RCLCPP_INFO(this->get_logger(), "received pose (%f, %f)",
+                   * sim_robot_positions_[i][0], sim_robot_positions_[i][1]); */
                   coverage_system_ptr_->SetGlobalRobotPosition(
                       i, sim_robot_positions_[i]);
                 }
@@ -214,7 +221,9 @@ class CoverageControlSimCentralized : public rclcpp::Node {
               cbg_world_pos_sub_opt));
     }
 
-    while ((received_pos.size() < static_cast<size_t>(parameters_.pNumRobots)) && rclcpp::ok()) {
+    while (
+        (received_pos.size() < static_cast<size_t>(parameters_.pNumRobots)) &&
+        rclcpp::ok()) {
       RCLCPP_INFO(this->get_logger(),
                   "Waiting for robot positions, received %ld of %d",
                   received_pos.size(), parameters_.pNumRobots);
@@ -223,8 +232,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     }
 
     if (rcpputils::fs::exists(idf_file_)) {
-      RCLCPP_INFO(this->get_logger(), "Reading IDF file %s",
-                  idf_file_.c_str());
+      RCLCPP_INFO(this->get_logger(), "Reading IDF file %s", idf_file_.c_str());
     } else {
       RCLCPP_ERROR(this->get_logger(), "IDF file %s does not exist",
                    idf_file_.c_str());
@@ -234,6 +242,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     parameters_.pNumFeatures = world_idf.GetNumFeatures();
     coverage_system_ptr_ = std::make_shared<CoverageSystem>(
         parameters_, world_idf, sim_robot_positions_);
+
+    CreateServiceServers();
 
     // CreateRobotPosPublishers();
 
@@ -262,6 +272,11 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   Parameters const &GetParameters() { return parameters_; }
 
  private:
+  rclcpp::Service<async_pac_gnn_interfaces::srv::NamespacesRobots>::SharedPtr
+      namespaces_robots_service_;
+
+  void CreateServiceServers();
+
   void CreateSimCentralizedSetup();
 
   void CreateCmdSubscribers();

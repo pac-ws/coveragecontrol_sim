@@ -24,6 +24,7 @@ find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(CoverageControl REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(async_pac_gnn_interfaces REQUIRED)
 
 set(target_dependencies
   rclcpp
@@ -32,7 +33,8 @@ set(target_dependencies
   sensor_msgs
   ament_index_cpp
   tf2_ros
-  CoverageControl)
+  CoverageControl
+  async_pac_gnn_interfaces)
 
 add_executable(sim_centralized src/sim_centralized.cpp src/centralized.cpp)
 target_include_directories(sim_centralized PUBLIC
