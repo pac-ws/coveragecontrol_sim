@@ -39,7 +39,7 @@ void CoverageControlSimCentralized::CreateSimCentralizedSetup() {
       rclcpp::shutdown();
     }
     WorldIDF world_idf(parameters_, idf_file_);
-    parameters_.pNumFeatures = world_idf.GetNumFeatures();
+    parameters_.pNumGaussianFeatures = world_idf.GetNumFeatures();
     CoverageControl::PointVector robot_positions(parameters_.pNumRobots);
     coverage_system_ptr_ = std::make_shared<CoverageSystem>(
         parameters_, world_idf, robot_positions);

@@ -94,7 +94,7 @@ class CoverageControlSim : public rclcpp::Node {
 				WorldIDF world_idf(parameters_, idf_file);
 				coverage_system_ptr_ = std::make_shared<CoverageSystem>(parameters_, world_idf, pos_file);
 			} else {
-				coverage_system_ptr_ = std::make_shared<CoverageSystem>(parameters_, parameters_.pNumFeatures, parameters_.pNumRobots);
+				coverage_system_ptr_ = std::make_shared<CoverageSystem>(parameters_, parameters_.pNumGaussianFeatures, parameters_.pNumRobots);
 			}
 
 			/* auto cbg_robot_pos_pub_opt = rclcpp::PublisherOptions(); */

@@ -231,7 +231,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
       rclcpp::shutdown();
     }
     WorldIDF world_idf(parameters_, idf_file_);
-    parameters_.pNumFeatures = world_idf.GetNumFeatures();
+    parameters_.pNumGaussianFeatures = world_idf.GetNumFeatures();
     coverage_system_ptr_ = std::make_shared<CoverageSystem>(
         parameters_, world_idf, sim_robot_positions_);
 
