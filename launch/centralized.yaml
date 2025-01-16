@@ -12,12 +12,6 @@ launch:
       name: 'scale_factor'
       default: '1.0'
   - arg:
-      name: 'offset_x'
-      default: '0.0'
-  - arg:
-      name: 'offset_y'
-      default: '0.0'
-  - arg:
       name: 'pose_timeout'
       default: '30.0'
 
