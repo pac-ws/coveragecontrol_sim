@@ -41,8 +41,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   int buffer_size_ = 10;
   double env_scale_factor_;
   double vel_scale_factor_;
-  std::string mode_;
   int robot_id_ = 0;
+  double pose_timeout_ = 30.0;
 
   PointVector world_robot_positions_;  // Actual robot positions in the world
   PointVector sim_robot_positions_;  // Scaled robot positions in the simulation
@@ -153,7 +153,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     idf_file_ = this->declare_parameter<std::string>("idf_file");
     env_scale_factor_ = this->declare_parameter<double>("env_scale_factor", 1);
     vel_scale_factor_ = this->declare_parameter<double>("vel_scale_factor", 1);
-    mode_ = this->declare_parameter<std::string>("mode", "sim");
+    pose_timeout_ = this->declare_parameter<double>("pose_timeout", 30.0);
 
     namespaces_of_robots_ = this->declare_parameter<std::vector<std::string>>(
         "namespaces_of_robots", std::vector<std::string>());
@@ -176,51 +176,43 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     world_robot_positions_.resize(parameters_.pNumRobots, Point2(0, 0));
     sim_robot_positions_.resize(parameters_.pNumRobots, Point2(0, 0));
 
-    /* if (mode_ == "sim") { */
-    /*   CreateSimCentralizedSetup(); */
-    /*   CreateCmdSubscribers(); */
-    /* } else if (mode_ == "real") { */
-    /* } else { */
-    /*   RCLCPP_ERROR(this->get_logger(), "Invalid mode: %s", mode_.c_str()); */
-    /*   rclcpp::shutdown(); */
-    /* } */
-    std::unordered_set<int> received_pos;
+    std::vector<int> received_pos(parameters_.pNumRobots, 0);
     cbg_world_pos_sub_ = this->create_callback_group(
-        rclcpp::CallbackGroupType::MutuallyExclusive);
+        rclcpp::CallbackGroupType::Reentrant);
     auto cbg_world_pos_sub_opt = rclcpp::SubscriptionOptions();
     cbg_world_pos_sub_opt.callback_group = cbg_world_pos_sub_;
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       world_pos_subs_.push_back(
           this->create_subscription<geometry_msgs::msg::PoseStamped>(
               "/" + namespaces_of_robots_[i] + "/pose",
-              /* rclcpp::QoS(buffer_size_), */
               qos,
               [this, i,
                &received_pos](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
                 world_robot_positions_[i] =
                     Point2(msg->pose.position.x, msg->pose.position.y);
-                sim_robot_positions_[i] =
-                    world_robot_positions_[i] * env_scale_factor_;
                 if (coverage_system_ptr_ == nullptr) {
-                  received_pos.insert(i);
-                } else {
-                  /* RCLCPP_INFO(this->get_logger(), "received pose (%f, %f)",
-                   * sim_robot_positions_[i][0], sim_robot_positions_[i][1]); */
-                  coverage_system_ptr_->SetGlobalRobotPosition(
-                      i, sim_robot_positions_[i]);
+                  received_pos[i] = 1;
                 }
               },
               cbg_world_pos_sub_opt));
     }
 
+    int num_received_pos = 0;
+    // Get current ROS time
+    auto start_time = this->now();
+    auto elapsed_time = this->now() - start_time;
     while (
-        (received_pos.size() < static_cast<size_t>(parameters_.pNumRobots)) &&
+        (num_received_pos < static_cast<int>(parameters_.pNumRobots)) &&
+        elapsed_time.seconds() < pose_timeout_ &&
         rclcpp::ok()) {
       RCLCPP_INFO(this->get_logger(),
-                  "Waiting for robot positions, received %ld of %d",
-                  received_pos.size(), parameters_.pNumRobots);
-      rclcpp::sleep_for(100ms);
+                  "Waiting for robot positions, received %d of %d. Elapsed time: %f of %f seconds",
+                  num_received_pos, parameters_.pNumRobots, elapsed_time.seconds(), pose_timeout_);
+      num_received_pos = std::accumulate(received_pos.begin(),
+                                         received_pos.end(), 0);
+      rclcpp::sleep_for(500ms);
       rclcpp::spin_some(this->get_node_base_interface());
+      elapsed_time = this->now() - start_time;
     }
 
     if (rcpputils::fs::exists(idf_file_)) {

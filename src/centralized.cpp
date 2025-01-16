@@ -306,11 +306,13 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
     robot_poses_msg.header.frame_id = "map";
     robot_poses_msg.header.stamp = this->now();
 
-    sim_robot_positions_ = coverage_system_ptr_->GetRobotPositions();
+    /* sim_robot_positions_ = coverage_system_ptr_->GetRobotPositions(); */
     for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
+      sim_robot_positions_[robot_id] = world_robot_positions_[robot_id] * env_scale_factor_;
       robot_poses_msg.poses.push_back(
           XYtoPose(sim_robot_positions_[robot_id][0],
                    sim_robot_positions_[robot_id][1]));
+      coverage_system_ptr_->SetGlobalRobotPosition(robot_id, sim_robot_positions_[robot_id]);
     }
     robot_poses_pub->publish(robot_poses_msg);
     for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
