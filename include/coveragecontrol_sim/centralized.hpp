@@ -206,7 +206,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
         elapsed_time.seconds() < pose_timeout_ &&
         rclcpp::ok()) {
       RCLCPP_INFO(this->get_logger(),
-                  "Waiting for robot positions, received %d of %d. Elapsed time: %f of %f seconds",
+                  "Waiting for robot positions, received %d of %d. Elapsed time: %.2f of %.2f seconds",
                   num_received_pos, parameters_.pNumRobots, elapsed_time.seconds(), pose_timeout_);
       num_received_pos = std::accumulate(received_pos.begin(),
                                          received_pos.end(), 0);
