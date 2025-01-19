@@ -50,7 +50,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   std::string params_file_, idf_file_;
 
   rmw_qos_profile_t qos_profile_sensor_data_ = rmw_qos_profile_sensor_data;
-  rclcpp::QoS qos =
+  rclcpp::QoS qos_ =
       rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_sensor_data_.history,
                                             qos_profile_sensor_data_.depth),
                   qos_profile_sensor_data_);
@@ -185,7 +185,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
       world_pos_subs_.push_back(
           this->create_subscription<geometry_msgs::msg::PoseStamped>(
               "/" + namespaces_of_robots_[i] + "/pose",
-              qos,
+              qos_,
               [this, i,
                &received_pos](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
                 world_robot_positions_[i] =
