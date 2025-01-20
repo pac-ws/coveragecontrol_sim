@@ -11,6 +11,7 @@
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
 #include <functional>
+#include <future>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -18,11 +19,12 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/wait_for_message.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <string>
 #include <vector>
 
@@ -104,15 +106,13 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   // Publisher for global map
   // rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
   //     global_map_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
-      global_map_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr global_map_pub_;
   rclcpp::TimerBase::SharedPtr global_map_pub_timer_;
 
   // Publisher for system map
   // rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
   //     system_map_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
-      system_map_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr system_map_pub_;
   rclcpp::TimerBase::SharedPtr system_map_pub_timer_;
 
   // Publisher for global explored idf map
@@ -181,44 +181,92 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     world_robot_positions_.resize(parameters_.pNumRobots, Point2(0, 0));
     sim_robot_positions_.resize(parameters_.pNumRobots, Point2(0, 0));
 
-    std::vector<int> received_pos(parameters_.pNumRobots, 0);
-    cbg_world_pos_sub_ = this->create_callback_group(
-        rclcpp::CallbackGroupType::Reentrant);
+    cbg_world_pos_sub_ =
+        this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     auto cbg_world_pos_sub_opt = rclcpp::SubscriptionOptions();
     cbg_world_pos_sub_opt.callback_group = cbg_world_pos_sub_;
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       world_pos_subs_.push_back(
           this->create_subscription<geometry_msgs::msg::PoseStamped>(
-              "/" + namespaces_of_robots_[i] + "/pose",
-              qos_,
-              [this, i,
-               &received_pos](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+              "/" + namespaces_of_robots_[i] + "/pose", qos_,
+              [this, i](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
                 world_robot_positions_[i] =
                     Point2(msg->pose.position.x, msg->pose.position.y);
-                if (coverage_system_ptr_ == nullptr) {
-                  received_pos[i] = 1;
-                }
               },
               cbg_world_pos_sub_opt));
     }
 
-    int num_received_pos = 0;
-    // Get current ROS time
-    auto start_time = this->now();
-    auto elapsed_time = this->now() - start_time;
-    while (
-        (num_received_pos < static_cast<int>(parameters_.pNumRobots)) &&
-        elapsed_time.seconds() < pose_timeout_ &&
-        rclcpp::ok()) {
-      RCLCPP_INFO(this->get_logger(),
-                  "Waiting for robot positions, received %d of %d. Elapsed time: %.2f of %.2f seconds",
-                  num_received_pos, parameters_.pNumRobots, elapsed_time.seconds(), pose_timeout_);
-      num_received_pos = std::accumulate(received_pos.begin(),
-                                         received_pos.end(), 0);
-      rclcpp::sleep_for(500ms);
-      rclcpp::spin_some(this->get_node_base_interface());
-      elapsed_time = this->now() - start_time;
+    std::vector<geometry_msgs::msg::PoseStamped> robot_poses;
+    robot_poses.resize(parameters_.pNumRobots);
+    std::vector<std::future<bool>> futures;
+    futures.reserve(parameters_.pNumRobots);
+
+    RCLCPP_INFO(this->get_logger(), "Waiting for robot poses for timeout: %.2f seconds", pose_timeout_);
+    for (int i = 0; i < parameters_.pNumRobots; ++i) {
+      auto fut = std::async(std::launch::async, [this, i, &robot_poses]() -> bool {
+        return rclcpp::wait_for_message<geometry_msgs::msg::PoseStamped>(
+            robot_poses[i], world_pos_subs_[i],
+            this->get_node_options().context(),
+            std::chrono::duration<double>(pose_timeout_));
+      });
+      futures.push_back(std::move(fut));
     }
+
+    for (int i = 0; i < parameters_.pNumRobots; ++i) {
+      futures[i].wait();
+    }
+    for (int i = 0; i < parameters_.pNumRobots; ++i) {
+      if (not futures[i].get()) {
+        RCLCPP_ERROR(this->get_logger(),
+                     "Failed to receive pose for robot %d with ns: %s", i+1,
+                     namespaces_of_robots_[i].c_str());
+      } else {
+        RCLCPP_INFO(this->get_logger(), "Received pose for robot %d with ns: %s",
+                    i, namespaces_of_robots_[i].c_str());
+      }
+    }
+    RCLCPP_INFO(this->get_logger(), "Received all robot poses");
+
+    // std::vector<int> received_pos(parameters_.pNumRobots, 0);
+    // cbg_world_pos_sub_ = this->create_callback_group(
+    //     rclcpp::CallbackGroupType::Reentrant);
+    // auto cbg_world_pos_sub_opt = rclcpp::SubscriptionOptions();
+    // cbg_world_pos_sub_opt.callback_group = cbg_world_pos_sub_;
+    // for (int i = 0; i < parameters_.pNumRobots; ++i) {
+    //   world_pos_subs_.push_back(
+    //       this->create_subscription<geometry_msgs::msg::PoseStamped>(
+    //           "/" + namespaces_of_robots_[i] + "/pose",
+    //           qos_,
+    //           [this, i,
+    //            &received_pos](geometry_msgs::msg::PoseStamped::SharedPtr msg)
+    //            {
+    //             world_robot_positions_[i] =
+    //                 Point2(msg->pose.position.x, msg->pose.position.y);
+    //             if (coverage_system_ptr_ == nullptr) {
+    //               received_pos[i] = 1;
+    //             }
+    //           },
+    //           cbg_world_pos_sub_opt));
+    // }
+
+    // int num_received_pos = 0;
+    // // Get current ROS time
+    // auto start_time = this->now();
+    // auto elapsed_time = this->now() - start_time;
+    // while (
+    //     (num_received_pos < static_cast<int>(parameters_.pNumRobots)) &&
+    //     elapsed_time.seconds() < pose_timeout_ &&
+    //     rclcpp::ok()) {
+    //   RCLCPP_INFO(this->get_logger(),
+    //               "Waiting for robot positions, received %d of %d. Elapsed time: %.2f of %.2f seconds", num_received_pos,
+    //               parameters_.pNumRobots, elapsed_time.seconds(),
+    //               pose_timeout_);
+    //   num_received_pos = std::accumulate(received_pos.begin(),
+    //                                      received_pos.end(), 0);
+    //   rclcpp::sleep_for(500ms);
+    //   rclcpp::spin_some(this->get_node_base_interface());
+    //   elapsed_time = this->now() - start_time;
+    // }
 
     if (rcpputils::fs::exists(idf_file_)) {
       RCLCPP_INFO(this->get_logger(), "Reading IDF file %s", idf_file_.c_str());
