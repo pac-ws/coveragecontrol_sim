@@ -241,12 +241,12 @@ void CoverageControlSimCentralized::CreateNeigborsIDPublisher() {
 void CoverageControlSimCentralized::CreateGlobalMapPublisher() {
   std::string topic_name = "global_map";
   global_map_pub_ =
-      this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_);
+      this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_name, qos_);
   auto global_map_pub = global_map_pub_;
   // Create timer to publish local map
   auto global_map_pub_timer_callback = [this, global_map_pub]() -> void {
     auto global_map = coverage_system_ptr_->GetWorldMap();
-    auto global_map_msg = EigenMatrixRowMajorToFloat32MultiArray(global_map);
+    auto global_map_msg = EigenMatrixRowMajorToPointCloud2(global_map);
     global_map_pub->publish(global_map_msg);
   };
   global_map_pub_timer_ =
@@ -256,12 +256,12 @@ void CoverageControlSimCentralized::CreateGlobalMapPublisher() {
 void CoverageControlSimCentralized::CreateSystemMapPublisher() {
   std::string topic_name = "system_map";
   system_map_pub_ =
-      this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_);
+      this->create_publisher<sensor_msgs::msg::PointCloud2>(topic_name, qos_);
   auto system_map_pub = system_map_pub_;
   // Create timer to publish local map
   auto system_map_pub_timer_callback = [this, system_map_pub]() -> void {
     auto system_map = coverage_system_ptr_->GetSystemMap();
-    auto system_map_msg = EigenMatrixRowMajorToFloat32MultiArray(system_map);
+    auto system_map_msg = EigenMatrixRowMajorToPointCloud2(system_map);
     /* auto system_map_msg =
      * EigenMatrixRowMajorToFloat32MultiArray(system_map(Eigen::seq(0,
      * Eigen::last, 2), Eigen::seq(0, Eigen::last, 2))); */

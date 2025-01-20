@@ -9,6 +9,8 @@
 #include <iostream>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/time.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <vector>
 
@@ -61,7 +63,8 @@ inline auto EigenMatrixToFloat32MultiArray(Eigen::MatrixXf matrix) {
 
 // Function for eigen matrix (row major) to std_msgs::msg::Float32MultiArray
 // conversion
-inline auto EigenMatrixRowMajorToFloat32MultiArrayInefficient(Eigen::MatrixXf matrix) {
+inline auto EigenMatrixRowMajorToFloat32MultiArrayInefficient(
+    Eigen::MatrixXf matrix) {
   std_msgs::msg::Float32MultiArray msg;
   // Convert eigen matrix to std_msgs::msg::Float32MultiArray
   msg.layout.dim.push_back(std_msgs::msg::MultiArrayDimension());
@@ -84,7 +87,8 @@ inline auto EigenMatrixRowMajorToFloat32MultiArrayInefficient(Eigen::MatrixXf ma
 
 inline auto EigenMatrixRowMajorToFloat32MultiArray(
     const RowMajorMatrixXf &in_matrix, int scale = 1) {
-  RowMajorMatrixXf matrix = in_matrix(Eigen::seq(0, Eigen::last, scale), Eigen::seq(0, Eigen::last, scale));
+  RowMajorMatrixXf matrix = in_matrix(Eigen::seq(0, Eigen::last, scale),
+                                      Eigen::seq(0, Eigen::last, scale));
   std_msgs::msg::Float32MultiArray msg;
 
   // Initialize dimensions
@@ -118,6 +122,64 @@ inline RowMajorMatrixXf Float32MultiArrayToEigenMatrixRowMajor(
 
   return matrix;
 }
+
+// EigenMatrixRowMajor to PointCloud2 conversion
+inline auto EigenMatrixRowMajorToPointCloud2(const RowMajorMatrixXf &in_matrix,
+                                             const double scale = 1.0) {
+  RowMajorMatrixXf matrix = in_matrix(Eigen::seq(0, Eigen::last, scale),
+                                      Eigen::seq(0, Eigen::last, scale));
+  // Create PointCloud2 message
+  sensor_msgs::msg::PointCloud2 msg;
+  msg.header.frame_id = "map";
+  msg.header.stamp = rclcpp::Clock().now();
+
+  sensor_msgs::msg::PointField x_field;
+  x_field.name = "x";
+  x_field.offset = 0;
+  x_field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+  x_field.count = 1;
+
+  sensor_msgs::msg::PointField y_field = x_field;
+  y_field.name = "y";
+  y_field.offset = 4;
+
+  sensor_msgs::msg::PointField z_field = x_field;
+  z_field.name = "z";
+  z_field.offset = 8;
+
+  sensor_msgs::msg::PointField intensity_field = x_field;
+  intensity_field.name = "intensity";
+  intensity_field.offset = 12;
+
+  msg.fields = {x_field, y_field, z_field, intensity_field};
+  msg.point_step = 16;
+  msg.is_bigendian = false;
+  msg.is_dense = true;
+
+  float z = 0.0f;
+  std::vector<float> point_data;
+  for (int i = 0; i < matrix.rows(); i++) {
+    for (int j = 0; j < matrix.cols(); j++) {
+      float val = matrix(i, j);
+      if (val == -1) {
+        continue;
+      }
+      point_data.push_back(i * scale);
+      point_data.push_back(j * scale);
+      point_data.push_back(z);
+      point_data.push_back(val);
+    }
+  }
+  msg.width = point_data.size() / 4;
+  msg.height = 1;
+  msg.row_step = msg.point_step * msg.width;
+
+  msg.data.resize(point_data.size() * sizeof(float));
+  memcpy(msg.data.data(), point_data.data(), msg.data.size());
+
+  return msg;
+}
+
 }  // namespace CoverageControlSim
 
 #endif  // COVERAGECONTROL_SIM_UTILS_HPP_

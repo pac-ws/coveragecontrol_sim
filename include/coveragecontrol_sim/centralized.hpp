@@ -22,6 +22,7 @@
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <string>
 #include <vector>
 
@@ -101,12 +102,16 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   std::vector<rclcpp::TimerBase::SharedPtr> robot_neighbors_id_pub_timers_;
 
   // Publisher for global map
-  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
+  // rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
+  //     global_map_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       global_map_pub_;
   rclcpp::TimerBase::SharedPtr global_map_pub_timer_;
 
   // Publisher for system map
-  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
+  // rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
+  //     system_map_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       system_map_pub_;
   rclcpp::TimerBase::SharedPtr system_map_pub_timer_;
 
