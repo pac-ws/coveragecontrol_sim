@@ -9,7 +9,7 @@ launch:
       name: 'sim_namespace'
       default: 'sim'
   - arg:
-      name: 'scale_factor'
+      name: 'env_scale_factor'
       default: '1.0'
   - arg:
       name: 'pose_timeout'
