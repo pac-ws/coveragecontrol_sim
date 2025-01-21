@@ -303,27 +303,26 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
 
     /* sim_robot_positions_ = coverage_system_ptr_->GetRobotPositions(); */
     for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
-      sim_robot_positions_[robot_id] = world_robot_positions_[robot_id] * env_scale_factor_;
       robot_poses_msg.poses.push_back(
           XYtoPose(sim_robot_positions_[robot_id][0],
                    sim_robot_positions_[robot_id][1]));
       coverage_system_ptr_->SetGlobalRobotPosition(robot_id, sim_robot_positions_[robot_id]);
     }
     robot_poses_pub->publish(robot_poses_msg);
-    for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
-      geometry_msgs::msg::TransformStamped transform;
-      transform.header.stamp = this->now();
-      transform.header.frame_id = "map";
-      transform.child_frame_id = namespaces_of_robots_[robot_id];
-      transform.transform.translation.x = sim_robot_positions_[robot_id][0];
-      transform.transform.translation.y = sim_robot_positions_[robot_id][1];
-      transform.transform.translation.z = 1.0;
-      transform.transform.rotation.x = 0.0;
-      transform.transform.rotation.y = 0.0;
-      transform.transform.rotation.z = 0.0;
-      transform.transform.rotation.w = 1.0;
-      tf_broadcaster_->sendTransform(transform);
-    }
+    // for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
+    //   geometry_msgs::msg::TransformStamped transform;
+    //   transform.header.stamp = this->now();
+    //   transform.header.frame_id = "map";
+    //   transform.child_frame_id = namespaces_of_robots_[robot_id];
+    //   transform.transform.translation.x = sim_robot_positions_[robot_id][0];
+    //   transform.transform.translation.y = sim_robot_positions_[robot_id][1];
+    //   transform.transform.translation.z = 1.0;
+    //   transform.transform.rotation.x = 0.0;
+    //   transform.transform.rotation.y = 0.0;
+    //   transform.transform.rotation.z = 0.0;
+    //   transform.transform.rotation.w = 1.0;
+    //   tf_broadcaster_->sendTransform(transform);
+    // }
   };
   robot_poses_pub_timer_ =
       this->create_wall_timer(30ms, robot_poses_pub_timer_callback);

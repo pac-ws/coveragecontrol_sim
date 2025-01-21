@@ -5,6 +5,7 @@
 #include <CoverageControl/parameters.h>
 #include <CoverageControl/world_idf.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 
 #include <ament_index_cpp/get_package_prefix.hpp>
 #include <async_pac_gnn_interfaces/srv/world_map.hpp>
@@ -74,6 +75,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   rclcpp::TimerBase::SharedPtr robot_poses_pub_timer_;
 
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
 
   std::vector<rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr>
       robot_local_map_pubs_;
@@ -178,6 +180,24 @@ class CoverageControlSimCentralized : public rclcpp::Node {
 
     buffer_size_ = this->declare_parameter<int>("buffer_size", 10);
 
+    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+    static_tf_broadcaster_ =
+        std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+    geometry_msgs::msg::TransformStamped transform;
+    transform.header.frame_id = "map";
+    transform.transform.translation.x = 0.0;
+    transform.transform.translation.y = 0.0;
+    transform.transform.translation.z = 1.0;
+    transform.transform.rotation.x = 0.0;
+    transform.transform.rotation.y = 0.0;
+    transform.transform.rotation.z = 0.0;
+    transform.transform.rotation.w = 1.0;
+
+    geometry_msgs::msg::TransformStamped transform_idf;
+    transform_idf.header.stamp = this->now();
+    transform_idf.child_frame_id = "idf";
+    static_tf_broadcaster_->sendTransform(transform_idf);
+
     world_robot_positions_.resize(parameters_.pNumRobots, Point2(0, 0));
     sim_robot_positions_.resize(parameters_.pNumRobots, Point2(0, 0));
 
@@ -185,13 +205,20 @@ class CoverageControlSimCentralized : public rclcpp::Node {
         this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     auto cbg_world_pos_sub_opt = rclcpp::SubscriptionOptions();
     cbg_world_pos_sub_opt.callback_group = cbg_world_pos_sub_;
+
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       world_pos_subs_.push_back(
           this->create_subscription<geometry_msgs::msg::PoseStamped>(
               "/" + namespaces_of_robots_[i] + "/pose", qos_,
-              [this, i](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+              [this, i, transform, namespaces_of_robots_](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+                sim_robot_positions_[i] = world_robot_positions_[i] * env_scale_factor_;
                 world_robot_positions_[i] =
                     Point2(msg->pose.position.x, msg->pose.position.y);
+                    transform.header.stamp = this->get_clock()->now();
+                    transform.child_frame_id = namespaces_of_robots_[i];
+                    transform.transform.translation.x = sim_robot_positions_[i][0];
+                    transform.transform.translation.y = sim_robot_positions_[i][1];
+                    tf_broadcaster_->sendTransform(transform);
               },
               cbg_world_pos_sub_opt));
     }
