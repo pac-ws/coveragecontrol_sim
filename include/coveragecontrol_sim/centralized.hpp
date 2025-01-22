@@ -4,8 +4,8 @@
 #include <CoverageControl/coverage_system.h>
 #include <CoverageControl/parameters.h>
 #include <CoverageControl/world_idf.h>
-#include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/static_transform_broadcaster.h>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include <ament_index_cpp/get_package_prefix.hpp>
 #include <async_pac_gnn_interfaces/srv/world_map.hpp>
@@ -148,6 +148,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   // timers
   std::vector<rclcpp::TimerBase::SharedPtr> cmd_vel_pub_timers_;
   rclcpp::TimerBase::SharedPtr cmd_vel_pub_timer_;
+  geometry_msgs::msg::TransformStamped tf_map_msg_;
 
  public:
   CoverageControlSimCentralized()
@@ -183,17 +184,17 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     static_tf_broadcaster_ =
         std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
-    geometry_msgs::msg::TransformStamped transform;
-    transform.header.frame_id = "map";
-    transform.transform.translation.x = 0.0;
-    transform.transform.translation.y = 0.0;
-    transform.transform.translation.z = 1.0;
-    transform.transform.rotation.x = 0.0;
-    transform.transform.rotation.y = 0.0;
-    transform.transform.rotation.z = 0.0;
-    transform.transform.rotation.w = 1.0;
+    tf_map_msg_.header.frame_id = "map";
+    tf_map_msg_.child_frame_id = "";
+    tf_map_msg_.transform.translation.x = 0.0;
+    tf_map_msg_.transform.translation.y = 0.0;
+    tf_map_msg_.transform.translation.z = 1.0;
+    tf_map_msg_.transform.rotation.x = 0.0;
+    tf_map_msg_.transform.rotation.y = 0.0;
+    tf_map_msg_.transform.rotation.z = 0.0;
+    tf_map_msg_.transform.rotation.w = 1.0;
 
-    geometry_msgs::msg::TransformStamped transform_idf;
+    geometry_msgs::msg::TransformStamped transform_idf = tf_map_msg_;
     transform_idf.header.stamp = this->now();
     transform_idf.child_frame_id = "idf";
     static_tf_broadcaster_->sendTransform(transform_idf);
@@ -207,20 +208,24 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     cbg_world_pos_sub_opt.callback_group = cbg_world_pos_sub_;
 
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
-      world_pos_subs_.push_back(
-          this->create_subscription<geometry_msgs::msg::PoseStamped>(
-              "/" + namespaces_of_robots_[i] + "/pose", qos_,
-              [this, i, transform, namespaces_of_robots_](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-                sim_robot_positions_[i] = world_robot_positions_[i] * env_scale_factor_;
-                world_robot_positions_[i] =
-                    Point2(msg->pose.position.x, msg->pose.position.y);
-                    transform.header.stamp = this->get_clock()->now();
-                    transform.child_frame_id = namespaces_of_robots_[i];
-                    transform.transform.translation.x = sim_robot_positions_[i][0];
-                    transform.transform.translation.y = sim_robot_positions_[i][1];
-                    tf_broadcaster_->sendTransform(transform);
-              },
-              cbg_world_pos_sub_opt));
+      std::string ns = namespaces_of_robots_[i];
+      std::string topic_name = "/" + ns + "/pose";
+      auto subs = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+          topic_name, qos_,
+          [this, robot_id=i, ns](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+            world_robot_positions_[robot_id] =
+                Point2(msg->pose.position.x, msg->pose.position.y);
+            double sim_x = msg->pose.position.x * env_scale_factor_;
+            double sim_y = msg->pose.position.y * env_scale_factor_;
+            sim_robot_positions_[robot_id] = Point2(sim_x, sim_y);
+            geometry_msgs::msg::TransformStamped tf_msg = tf_map_msg_;
+            tf_msg.header.stamp = msg->header.stamp;
+            tf_msg.child_frame_id = ns;
+            tf_msg.transform.translation.x = sim_x;
+            tf_msg.transform.translation.y = sim_y;
+            tf_broadcaster_->sendTransform(tf_msg);
+          });
+      world_pos_subs_.push_back(subs);
     }
 
     std::vector<geometry_msgs::msg::PoseStamped> robot_poses;
@@ -228,14 +233,17 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     std::vector<std::future<bool>> futures;
     futures.reserve(parameters_.pNumRobots);
 
-    RCLCPP_INFO(this->get_logger(), "Waiting for robot poses for timeout: %.2f seconds", pose_timeout_);
+    RCLCPP_INFO(this->get_logger(),
+                "Waiting for robot poses for timeout: %.2f seconds",
+                pose_timeout_);
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
-      auto fut = std::async(std::launch::async, [this, i, &robot_poses]() -> bool {
-        return rclcpp::wait_for_message<geometry_msgs::msg::PoseStamped>(
-            robot_poses[i], world_pos_subs_[i],
-            this->get_node_options().context(),
-            std::chrono::duration<double>(pose_timeout_));
-      });
+      auto fut =
+          std::async(std::launch::async, [this, i, &robot_poses]() -> bool {
+            return rclcpp::wait_for_message<geometry_msgs::msg::PoseStamped>(
+                robot_poses[i], world_pos_subs_[i],
+                this->get_node_options().context(),
+                std::chrono::duration<double>(pose_timeout_));
+          });
       futures.push_back(std::move(fut));
     }
 
@@ -245,11 +253,12 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       if (not futures[i].get()) {
         RCLCPP_ERROR(this->get_logger(),
-                     "Failed to receive pose for robot %d with ns: %s", i+1,
+                     "Failed to receive pose for robot %d with ns: %s", i + 1,
                      namespaces_of_robots_[i].c_str());
       } else {
-        RCLCPP_INFO(this->get_logger(), "Received pose for robot %d with ns: %s",
-                    i, namespaces_of_robots_[i].c_str());
+        RCLCPP_INFO(this->get_logger(),
+                    "Received pose for robot %d with ns: %s", i,
+                    namespaces_of_robots_[i].c_str());
       }
     }
     RCLCPP_INFO(this->get_logger(), "Received all robot poses");
@@ -285,7 +294,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     //     elapsed_time.seconds() < pose_timeout_ &&
     //     rclcpp::ok()) {
     //   RCLCPP_INFO(this->get_logger(),
-    //               "Waiting for robot positions, received %d of %d. Elapsed time: %.2f of %.2f seconds", num_received_pos,
+    //               "Waiting for robot positions, received %d of %d. Elapsed
+    //               time: %.2f of %.2f seconds", num_received_pos,
     //               parameters_.pNumRobots, elapsed_time.seconds(),
     //               pose_timeout_);
     //   num_received_pos = std::accumulate(received_pos.begin(),

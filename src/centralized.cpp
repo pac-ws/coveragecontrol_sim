@@ -1,31 +1,33 @@
 #include <coveragecontrol_sim/centralized.hpp>
-#include <memory_resource>
 
 namespace CoverageControlSim {
 
 void CoverageControlSimCentralized::CreateServiceServers() {
-  world_map_service_ = this->create_service<
-      async_pac_gnn_interfaces::srv::WorldMap>(
-      "get_world_map",
-      [this](const std::shared_ptr<async_pac_gnn_interfaces::srv::WorldMap::Request> request,
-         std::shared_ptr<async_pac_gnn_interfaces::srv::WorldMap::Response>
-             response) {
-        RCLCPP_INFO(this->get_logger(),
-                    "Incoming request\nmap_size: %d", request->map_size);
-        if(request->map_size != parameters_.pWorldMapSize) {
-          response->success = false;
-          response->map = EigenMatrixRowMajorToFloat32MultiArray(
-              Eigen::MatrixXf::Zero(parameters_.pWorldMapSize,
-                                    parameters_.pWorldMapSize));
-          RCLCPP_ERROR(this->get_logger(),
-                       "World map size does not match with the system");
-        } else {
-          response->success = true;
-          response->map = EigenMatrixRowMajorToFloat32MultiArray(
-              coverage_system_ptr_->GetWorldMap());
-          RCLCPP_INFO(this->get_logger(), "World map sent");
-        }
-      });
+  world_map_service_ =
+      this->create_service<async_pac_gnn_interfaces::srv::WorldMap>(
+          "get_world_map",
+          [this](
+              const std::shared_ptr<
+                  async_pac_gnn_interfaces::srv::WorldMap::Request>
+                  request,
+              std::shared_ptr<async_pac_gnn_interfaces::srv::WorldMap::Response>
+                  response) {
+            RCLCPP_INFO(this->get_logger(), "Incoming request\nmap_size: %d",
+                        request->map_size);
+            if (request->map_size != parameters_.pWorldMapSize) {
+              response->success = false;
+              response->map =
+                  EigenMatrixRowMajorToFloat32MultiArray(Eigen::MatrixXf::Zero(
+                      parameters_.pWorldMapSize, parameters_.pWorldMapSize));
+              RCLCPP_ERROR(this->get_logger(),
+                           "World map size does not match with the system");
+            } else {
+              response->success = true;
+              response->map = EigenMatrixRowMajorToFloat32MultiArray(
+                  coverage_system_ptr_->GetWorldMap());
+              RCLCPP_INFO(this->get_logger(), "World map sent");
+            }
+          });
 }
 
 void CoverageControlSimCentralized::CreateSimCentralizedSetup() {
@@ -137,7 +139,8 @@ void CoverageControlSimCentralized::CreateRobotPosPublishers() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/world_pose";
     robot_pos_pubs_.push_back(
-        this->create_publisher<geometry_msgs::msg::PoseStamped>(topic_name, qos_));
+        this->create_publisher<geometry_msgs::msg::PoseStamped>(topic_name,
+                                                                qos_));
     auto robot_pos_pub = robot_pos_pubs_.back();
     auto robot_pos_pub_timer_callback = [this, robot_id,
                                          robot_pos_pub]() -> void {
@@ -156,7 +159,8 @@ void CoverageControlSimCentralized::CreateRobotSimPosPublishers() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/sim_pose";
     robot_sim_pos_pubs_.push_back(
-        this->create_publisher<geometry_msgs::msg::PoseStamped>(topic_name, qos_));
+        this->create_publisher<geometry_msgs::msg::PoseStamped>(topic_name,
+                                                                qos_));
     auto robot_sim_pos_pub = robot_sim_pos_pubs_.back();
     auto robot_sim_pos_pub_timer_callback = [this, robot_id,
                                              robot_sim_pos_pub]() -> void {
@@ -177,7 +181,8 @@ void CoverageControlSimCentralized::CreateRobotMapPublishers() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/map";
     robot_map_pubs_.push_back(
-        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_));
+        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name,
+                                                                 qos_));
     auto robot_map_pub = robot_map_pubs_.back();
     auto robot_map_pub_timer_callback = [this, robot_id,
                                          robot_map_pub]() -> void {
@@ -195,7 +200,8 @@ void CoverageControlSimCentralized::CreateNeigborsPosPublisher() {
     std::string topic_name =
         namespaces_of_robots_[robot_id] + "/neighbors_pose";
     robot_neighbors_pose_pubs_.push_back(
-        this->create_publisher<geometry_msgs::msg::PoseArray>(topic_name, qos_));
+        this->create_publisher<geometry_msgs::msg::PoseArray>(topic_name,
+                                                              qos_));
     auto robot_neighbor_pos_pub = robot_neighbors_pose_pubs_.back();
     auto robot_neighbor_pos_pub_timer_callback =
         [this, robot_id, robot_neighbor_pos_pub]() -> void {
@@ -219,7 +225,8 @@ void CoverageControlSimCentralized::CreateNeigborsIDPublisher() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/neighbors_id";
     robot_neighbors_id_pubs_.push_back(
-        this->create_publisher<std_msgs::msg::Int32MultiArray>(topic_name, qos_));
+        this->create_publisher<std_msgs::msg::Int32MultiArray>(topic_name,
+                                                               qos_));
     auto robot_neighbor_id_pub = robot_neighbors_id_pubs_.back();
     auto robot_neighbor_id_pub_timer_callback =
         [this, robot_id, robot_neighbor_id_pub]() -> void {
@@ -274,7 +281,8 @@ void CoverageControlSimCentralized::CreateSystemMapPublisher() {
 void CoverageControlSimCentralized::CreateExploredIDFMapPublisher() {
   std::string topic_name = "global_explored_idf_map";
   global_explored_idf_map_pub_ =
-      this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_);
+      this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name,
+                                                               qos_);
   auto global_explored_idf_map_pub = global_explored_idf_map_pub_;
   // Create timer to publish local map
   auto global_explored_idf_map_pub_timer_callback =
@@ -293,7 +301,7 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
   robot_poses_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>(
       "all_robot_sim_poses", qos_);
   auto robot_poses_pub = robot_poses_pub_;
-  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+  /* tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this); */
   // Create timer to publish local map
   auto robot_poses_pub_timer_callback = [this, robot_poses_pub]() -> void {
     geometry_msgs::msg::PoseArray robot_poses_msg;
@@ -306,7 +314,8 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
       robot_poses_msg.poses.push_back(
           XYtoPose(sim_robot_positions_[robot_id][0],
                    sim_robot_positions_[robot_id][1]));
-      coverage_system_ptr_->SetGlobalRobotPosition(robot_id, sim_robot_positions_[robot_id]);
+      coverage_system_ptr_->SetGlobalRobotPosition(
+          robot_id, sim_robot_positions_[robot_id]);
     }
     robot_poses_pub->publish(robot_poses_msg);
     // for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
@@ -332,7 +341,8 @@ void CoverageControlSimCentralized::CreateRobotLocalMapPublishers() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/local_map";
     robot_local_map_pubs_.push_back(
-        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_));
+        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name,
+                                                                 qos_));
     auto robot_local_map_pub = robot_local_map_pubs_.back();
     // Create timer to publish local map
     auto robot_local_map_pub_timer_callback = [this, robot_id,
@@ -350,7 +360,8 @@ void CoverageControlSimCentralized::CreateObstacleMapsPublisher() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/obstacle_map";
     robot_obstacle_map_pubs_.push_back(
-        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_));
+        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name,
+                                                                 qos_));
     auto robot_obstacle_map_pub = robot_obstacle_map_pubs_.back();
     auto robot_obstacle_map_pub_timer_callback =
         [this, robot_id, robot_obstacle_map_pub]() -> void {
@@ -369,7 +380,8 @@ void CoverageControlSimCentralized::CreateSensorViewPublisher() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/sensor_view";
     robot_sensor_view_pubs_.push_back(
-        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name, qos_));
+        this->create_publisher<std_msgs::msg::Float32MultiArray>(topic_name,
+                                                                 qos_));
     auto robot_sensor_view_pub = robot_sensor_view_pubs_.back();
     auto robot_sensor_view_pub_timer_callback =
         [this, robot_id, robot_sensor_view_pub]() -> void {
@@ -387,7 +399,8 @@ void CoverageControlSimCentralized::CreateCmdVelPublisher() {
   for (int robot_id = 0; robot_id < parameters_.pNumRobots; ++robot_id) {
     std::string topic_name = namespaces_of_robots_[robot_id] + "/cmd_vel";
     cmd_vel_pubs_.push_back(
-        this->create_publisher<geometry_msgs::msg::TwistStamped>(topic_name, qos_));
+        this->create_publisher<geometry_msgs::msg::TwistStamped>(topic_name,
+                                                                 qos_));
   }
   sim_robot_positions_ = coverage_system_ptr_->GetRobotPositions();
   auto cmd_vel_pub_timer_callback = [this]() -> void {
