@@ -28,6 +28,33 @@ void CoverageControlSimCentralized::CreateServiceServers() {
               RCLCPP_INFO(this->get_logger(), "World map sent");
             }
           });
+  system_info_service_ =
+      this->create_service<async_pac_gnn_interfaces::srv::SystemInfo>(
+          "get_system_info",
+          [this](
+              const std::shared_ptr<
+                  async_pac_gnn_interfaces::srv::SystemInfo::Request>
+                  request,
+              std::shared_ptr<async_pac_gnn_interfaces::srv::SystemInfo::Response>
+                  response) {
+            RCLCPP_INFO(this->get_logger(), "Incoming request\nmap_size: %d",
+                        request->map_size);
+            if (request->map_size != parameters_.pWorldMapSize) {
+              response->success = false;
+              response->map =
+                  EigenMatrixRowMajorToFloat32MultiArray(Eigen::MatrixXf::Zero(
+                      parameters_.pWorldMapSize, parameters_.pWorldMapSize));
+              RCLCPP_ERROR(this->get_logger(),
+                           "World map size does not match with the system");
+            } else {
+              response->success = true;
+              response->velocity_scale_factor = vel_scale_factor_;
+              response->namespaces = namespaces_of_robots_;
+              response->map = EigenMatrixRowMajorToFloat32MultiArray(
+                  coverage_system_ptr_->GetWorldMap());
+              RCLCPP_INFO(this->get_logger(), "System Info sent");
+            }
+          });
 }
 
 void CoverageControlSimCentralized::CreateSimCentralizedSetup() {

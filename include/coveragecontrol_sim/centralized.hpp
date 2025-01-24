@@ -9,6 +9,7 @@
 
 #include <ament_index_cpp/get_package_prefix.hpp>
 #include <async_pac_gnn_interfaces/srv/world_map.hpp>
+#include <async_pac_gnn_interfaces/srv/system_info.hpp>
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
 #include <functional>
@@ -352,6 +353,9 @@ class CoverageControlSimCentralized : public rclcpp::Node {
  private:
   rclcpp::Service<async_pac_gnn_interfaces::srv::WorldMap>::SharedPtr
       world_map_service_;
+
+  rclcpp::Service<async_pac_gnn_interfaces::srv::SystemInfo>::SharedPtr
+      system_info_service_;
 
   void CreateServiceServers();
 
