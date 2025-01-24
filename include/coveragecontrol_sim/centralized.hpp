@@ -255,6 +255,10 @@ class CoverageControlSimCentralized : public rclcpp::Node {
         RCLCPP_ERROR(this->get_logger(),
                      "Failed to receive pose for robot %d with ns: %s", i + 1,
                      namespaces_of_robots_[i].c_str());
+        geometry_msgs::msg::TransformStamped tf_msg = tf_map_msg_;
+        tf_msg.header.stamp = this->now();
+        tf_msg.child_frame_id = namespaces_of_robots_[i];
+        tf_broadcaster_->sendTransform(tf_msg);
       } else {
         RCLCPP_INFO(this->get_logger(),
                     "Received pose for robot %d with ns: %s", i,
