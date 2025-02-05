@@ -41,17 +41,20 @@ void CoverageControlSimCentralized::CreateServiceServers() {
                         request->map_size);
             if (request->map_size != parameters_.pWorldMapSize) {
               response->success = false;
-              response->map =
-                  EigenMatrixRowMajorToFloat32MultiArray(Eigen::MatrixXf::Zero(
-                      parameters_.pWorldMapSize, parameters_.pWorldMapSize));
+              //response->map =
+              //    EigenMatrixRowMajorToFloat32MultiArray(Eigen::MatrixXf::Zero(
+              //        parameters_.pWorldMapSize, parameters_.pWorldMapSize));
+              // TODO: This needs a better solution
+              response->idf_file = idf_file_;
               RCLCPP_ERROR(this->get_logger(),
                            "World map size does not match with the system");
             } else {
               response->success = true;
               response->velocity_scale_factor = vel_scale_factor_;
               response->namespaces = namespaces_of_robots_;
-              response->map = EigenMatrixRowMajorToFloat32MultiArray(
-                  coverage_system_ptr_->GetWorldMap());
+              //response->map = EigenMatrixRowMajorToFloat32MultiArray(
+              //    coverage_system_ptr_->GetWorldMap());
+              response->idf_file = idf_file_;
               RCLCPP_INFO(this->get_logger(), "System Info sent");
             }
           });
