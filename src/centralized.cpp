@@ -37,7 +37,7 @@ void CoverageControlSimCentralized::CreateServiceServers() {
                   request,
               std::shared_ptr<async_pac_gnn_interfaces::srv::SystemInfo::Response>
                   response) {
-            RCLCPP_INFO(this->get_logger(), "Incoming request\nmap_size: %d",
+            RCLCPP_INFO(this->get_logger(), "Incoming request, map_size: %d",
                         request->map_size);
             if (request->map_size != parameters_.pWorldMapSize) {
               response->success = false;
