@@ -327,6 +327,25 @@ void CoverageControlSimCentralized::CreateExploredIDFMapPublisher() {
       100ms, global_explored_idf_map_pub_timer_callback);
 }
 
+
+void CoverageControlSimCentralized::CreateCoverageCostPublisher() {
+  std::string topic_name = "coverage_cost";
+  coverage_cost_pub_ =
+      this->create_publisher<std_msgs::msg::Float32>(topic_name, qos_);
+  auto coverage_cost_pub = coverage_cost_pub_;
+  // Create timer to publish the coverage cost
+  auto coverage_cost_pub_timer_callback =
+      [this, coverage_cost_pub]() -> void {
+    auto coverage_cost =
+        coverage_system_ptr_->GetObjectiveValue();
+    std_msgs::msg::Float32 coverage_cost_msg;
+    coverage_cost_msg.data = coverage_cost;
+    coverage_cost_pub->publish(coverage_cost_msg);
+  };
+  coverage_cost_pub_timer_ = this->create_wall_timer(
+      100ms, coverage_cost_pub_timer_callback);
+}
+
 void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
   robot_poses_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>(
       "all_robot_sim_poses", qos_);

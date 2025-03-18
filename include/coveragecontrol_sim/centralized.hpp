@@ -23,6 +23,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/wait_for_message.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/float32.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/int32_multi_array.hpp>
@@ -122,6 +123,11 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
       global_explored_idf_map_pub_;
   rclcpp::TimerBase::SharedPtr global_explored_idf_map_pub_timer_;
+
+  // Publisher for coverage cost
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr
+      coverage_cost_pub_;
+  rclcpp::TimerBase::SharedPtr coverage_cost_pub_timer_;
 
   // Subscribe to robot positions for each robot
   std::vector<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr>
@@ -343,6 +349,9 @@ class CoverageControlSimCentralized : public rclcpp::Node {
 
     CreateAllRobotsPosesPublisher();
 
+    CreateCoverageCostPublisher();
+    RCLCPP_INFO(this->get_logger(), "Created cost publisher");
+
     /* CreateCmdVelPublisher(); */
     RCLCPP_INFO(this->get_logger(), "Constructor finished");
   }
@@ -371,6 +380,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   void CreateSystemMapPublisher();
   void CreateGlobalMapPublisher();
   void CreateExploredIDFMapPublisher();
+  void CreateCoverageCostPublisher();
 
   void CreateRobotMapPublishers();
   void CreateRobotLocalMapPublishers();
