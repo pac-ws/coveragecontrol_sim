@@ -5,6 +5,7 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/transform.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <iostream>
 #include <rclcpp/rclcpp.hpp>
@@ -19,10 +20,34 @@ namespace CoverageControlSim {
 using RowMajorMatrixXf =
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
+inline auto IdentityTransform() {
+  geometry_msgs::msg::Transform transform;
+  transform.translation.x = 0.0;
+  transform.translation.y = 0.0;
+  transform.translation.z = 0.0;
+  transform.rotation.x = 0.0;
+  transform.rotation.y = 0.0;
+  transform.rotation.z = 0.0;
+  transform.rotation.w = 1.0;
+  return transform;
+}
+
 inline auto XYtoPose(double const &x, double const &y) {
   geometry_msgs::msg::Pose pose;
   pose.position.x = x;
   pose.position.y = y;
+  pose.position.z = 0;
+  pose.orientation.x = 0;
+  pose.orientation.y = 0;
+  pose.orientation.z = 0;
+  pose.orientation.w = 1;
+  return pose;
+}
+
+inline auto ZeroPose() {
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = 0;
+  pose.position.y = 0;
   pose.position.z = 0;
   pose.orientation.x = 0;
   pose.orientation.y = 0;
@@ -59,6 +84,10 @@ inline auto EigenMatrixToFloat32MultiArray(Eigen::MatrixXf matrix) {
     }
   }
   return msg;
+}
+
+inline auto ZeroSquareMap(int size) {
+  return EigenMatrixToFloat32MultiArray(Eigen::MatrixXf::Zero(size, size));
 }
 
 // Function for eigen matrix (row major) to std_msgs::msg::Float32MultiArray
@@ -125,7 +154,9 @@ inline RowMajorMatrixXf Float32MultiArrayToEigenMatrixRowMajor(
 
 // EigenMatrixRowMajor to PointCloud2 conversion
 inline auto EigenMatrixRowMajorToPointCloud2(const RowMajorMatrixXf &in_matrix,
-                                             const double scale = 1.0) {
+                                             const float scale = 1.0,
+                                             const float offset_x = 0.0,
+                                             const float offset_y = 0.0) {
   RowMajorMatrixXf matrix = in_matrix(Eigen::seq(0, Eigen::last, scale),
                                       Eigen::seq(0, Eigen::last, scale));
   // Create PointCloud2 message
@@ -164,8 +195,8 @@ inline auto EigenMatrixRowMajorToPointCloud2(const RowMajorMatrixXf &in_matrix,
       if (val == -1) {
         continue;
       }
-      point_data.push_back(i * scale);
-      point_data.push_back(j * scale);
+      point_data.push_back(i * scale + offset_x);
+      point_data.push_back(j * scale + offset_y);
       point_data.push_back(z);
       point_data.push_back(val);
     }
