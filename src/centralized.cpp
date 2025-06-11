@@ -132,8 +132,10 @@ void CoverageControlSimCentralized::WaitForRobotPoses() {
       RCLCPP_ERROR(this->get_logger(),
                    "Failed to receive pose for robot %d with ns: %s", i,
                    robots_[i]->ns.c_str());
-      robots_[i]->tf_msg.header.stamp = this->now();
-      robots_[i]->pubs.tf_broadcaster->sendTransform(robots_[i]->tf_msg);
+      // robots_[i]->tf_msg.header.stamp = this->now();
+      // robots_[i]->pubs.tf_broadcaster->sendTransform(robots_[i]->tf_msg);
+      robots_[i]->SetWorldPose(0.0, 0.0);
+      robots_[i]->SetSimPose(Point2(0.0, 0.0));
     } else {
       RCLCPP_INFO(this->get_logger(), "Received pose for robot %d with ns: %s",
                   i, robots_[i]->ns.c_str());
