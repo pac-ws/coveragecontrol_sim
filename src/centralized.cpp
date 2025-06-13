@@ -36,22 +36,15 @@ void CoverageControlSimCentralized::CreateServiceServers() {
              std::shared_ptr<SystemInfo::Response> response) {
         RCLCPP_INFO(this->get_logger(), "Incoming request, map_size: %d",
                     request->map_size);
+        response->idf_file = GetIDFFile();
         if (request->map_size != parameters_.pWorldMapSize) {
           response->success = false;
-          {
-            std::shared_lock lock(idf_file_mutex_);
-            response->idf_file = idf_file_;
-          }
           RCLCPP_ERROR(this->get_logger(),
                        "World map size does not match with the system");
         } else {
           response->success = true;
           response->velocity_scale_factor = vel_scale_factor_;
           response->namespaces = namespaces_of_robots_;
-          {
-            std::shared_lock lock(idf_file_mutex_);
-            response->idf_file = idf_file_;
-          }
           RCLCPP_INFO(this->get_logger(), "System Info sent");
         }
       });
@@ -63,10 +56,7 @@ void CoverageControlSimCentralized::CreateServiceServers() {
         RCLCPP_INFO(this->get_logger(), "Incoming request for world file: %s",
                     request->name.c_str());
         response->success = true;
-        {
-          std::shared_lock lock(idf_file_mutex_);
-          response->file = idf_file_;
-        }
+        response->file = GetIDFFile();
         RCLCPP_INFO(this->get_logger(), "World file sent");
       });
 
@@ -86,11 +76,7 @@ void CoverageControlSimCentralized::CreateServiceServers() {
           return;
         }
         response->success = true;
-        {
-          std::unique_lock lock(idf_file_mutex_);
-          idf_file_ = in_idf_file;
-          this->set_parameter(rclcpp::Parameter("idf_file", idf_file_));
-        }
+        SetIDFFile(in_idf_file);
         CreateCoverageControlSystem();
         RCLCPP_INFO(this->get_logger(), "World file updated.");
       });
@@ -115,11 +101,11 @@ void CoverageControlSimCentralized::WaitForRobotPoses() {
   RCLCPP_INFO(this->get_logger(),
               "Waiting for robot poses for timeout: %.2f seconds",
               pose_timeout_);
-  for (int i = 0; i < parameters_.pNumRobots; ++i) {
+  for (auto robot : robots_) {
     auto fut =
-        std::async(std::launch::async, [this, i, &robot_poses]() -> bool {
+        std::async(std::launch::async, [this, robot, &robot_poses]() -> bool {
           return rclcpp::wait_for_message<PoseStamped>(
-              robots_[i]->start_pose, robots_[i]->subs.pose,
+              robot->start_pose, robot->subs.pose,
               this->get_node_options().context(),
               std::chrono::duration<double>(pose_timeout_));
         });
@@ -127,41 +113,23 @@ void CoverageControlSimCentralized::WaitForRobotPoses() {
   }
 
   int successful_poses = 0;
-  for (int i = 0; i < parameters_.pNumRobots; ++i) {
-    if (not futures[i].get()) {
+  for (auto robot : robots_) {
+    if (not futures[robot->id].get()) {
       RCLCPP_ERROR(this->get_logger(),
-                   "Failed to receive pose for robot %d with ns: %s", i,
-                   robots_[i]->ns.c_str());
-      // robots_[i]->tf_msg.header.stamp = this->now();
-      // robots_[i]->pubs.tf_broadcaster->sendTransform(robots_[i]->tf_msg);
-      robots_[i]->SetWorldPose(0.0, 0.0);
-      robots_[i]->SetSimPose(Point2(0.0, 0.0));
+                   "Failed to receive pose for robot %d with ns: %s",
+                   robot->id, robot->ns.c_str());
+      robot->PublishTransform();
     } else {
+      auto position = robot->start_pose.pose.position;
+      Point2 pose_xy = Point2(position.x, position.y);
+      robot->Update(pose_xy);
       RCLCPP_INFO(this->get_logger(), "Received pose for robot %d with ns: %s",
-                  i, robots_[i]->ns.c_str());
+                  robot->id, robot->ns.c_str());
       successful_poses++;
     }
   }
-
   RCLCPP_INFO(this->get_logger(), "Received %d out of %d robot poses",
               successful_poses, parameters_.pNumRobots);
-}
-
-void CoverageControlSimCentralized::CreateTFBroadcasters() {
-  for (auto &robot : robots_) {
-    robot->pubs.tf_broadcaster =
-        std::make_shared<tf2_ros::TransformBroadcaster>(this);
-    auto pub_cb = [robot, scale = env_scale_factor_]() -> void {
-      Point2 sim_pos = robot->GetWorldPose() * scale;
-      robot->SetSimPose(sim_pos);
-      robot->tf_msg.header.stamp = rclcpp::Clock().now();
-      robot->tf_msg.transform.translation.x = sim_pos[0];
-      robot->tf_msg.transform.translation.y = sim_pos[1];
-      robot->pubs.tf_broadcaster->sendTransform(robot->tf_msg);
-    };
-    robot->timers.tf_broadcaster_timer =
-        this->create_wall_timer(short_interval_, pub_cb, robot->cbg_reentrant_);
-  }
 }
 
 void CoverageControlSimCentralized::CreateRobotPoseSubscribers() {
@@ -171,8 +139,8 @@ void CoverageControlSimCentralized::CreateRobotPoseSubscribers() {
     std::string topic_name = "/" + robot->ns + "/pose";
     robot->subs.pose = this->create_subscription<PoseStamped>(
         topic_name, qos_,
-        [robot](PoseStamped::SharedPtr msg) {
-          robot->SetWorldPose(msg->pose.position.x, msg->pose.position.y);
+        [robot, scale = env_scale_factor_](PoseStamped::SharedPtr msg) {
+          robot->Update(Point2(msg->pose.position.x, msg->pose.position.y));
         },
         cbg_opt);
   }
@@ -198,6 +166,9 @@ void CoverageControlSimCentralized::CreateCoverageControlSystem() {
     WorldIDF world_idf(parameters_, idf_file_);
     parameters_.pNumGaussianFeatures = world_idf.GetNumFeatures();
     UpdateSimRobotPositions();
+    for (Point2 pos : sim_robot_positions_) {
+      RCLCPP_INFO(this->get_logger(), "Start pose: (%f, %f)", pos[0], pos[1]);
+    }
     std::unique_lock cc_lock(cc_mutex_);
     coverage_system_ptr_.reset();
     coverage_system_ptr_ = std::make_shared<CoverageSystem>(
@@ -239,7 +210,8 @@ void CoverageControlSimCentralized::CreateRobotSimPosPublishers() {
     robot->pubs.sim_pose =
         this->create_publisher<PoseStamped>(topic_name, qos_);
     auto pos_cb = [robot]() -> void {
-      Point2 robot_pose = robot->GetSimPose();
+      Point2 robot_pose;
+      robot->GetSimPose(robot_pose);
       auto robot_pos_msg = XYtoPoseStamped(robot_pose[0], robot_pose[1]);
       robot->pubs.sim_pose->publish(robot_pos_msg);
     };
@@ -254,16 +226,9 @@ void CoverageControlSimCentralized::CreateNeighborsPosPublisher() {
     robot->pubs.neighbors_pose =
         this->create_publisher<PoseArray>(topic_name, qos_);
     auto pub_cb = [this, robot]() -> void {
-      if (coverage_system_ptr_ == nullptr) {
-        RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-        return;
-      }
       PointVector neighbors_pos;
-      {
-        std::shared_lock lock(cc_mutex_, std::try_to_lock);
-        if (not lock.owns_lock()) {
-          return;
-        }
+      { std::shared_lock lock(cc_mutex_);
+        if (coverage_system_ptr_ == nullptr) { return; }
         neighbors_pos =
             coverage_system_ptr_->GetRelativePositonsNeighbors(robot->id);
       }
@@ -286,16 +251,9 @@ void CoverageControlSimCentralized::CreateNeighborsIDPublisher() {
     robot->pubs.neighbors_id =
         this->create_publisher<Int32MultiArray>(topic_name, qos_);
     auto pub_cb = [this, robot]() -> void {
-      if (coverage_system_ptr_ == nullptr) {
-        RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-        return;
-      }
       std::vector<int> neighbors_id;
-      {
-        std::shared_lock lock(cc_mutex_, std::try_to_lock);
-        if (not lock.owns_lock()) {
-          return;
-        }
+      { std::shared_lock lock(cc_mutex_);
+        if (coverage_system_ptr_ == nullptr) { return; }
         neighbors_id = coverage_system_ptr_->GetNeighborIDs(robot->id);
       }
       Int32MultiArray neighbor_id_msg;
@@ -317,15 +275,9 @@ void CoverageControlSimCentralized::CreateGlobalMapPublisher() {
   global_map_pub_ = this->create_publisher<PointCloud2>(topic_name, qos_);
 
   auto pub_cb = [this]() -> void {
-    if (coverage_system_ptr_ == nullptr) {
-      return;
-    }
     PointCloud2 global_map_msg;
-    {
-      std::shared_lock cc_mutex_lock(cc_mutex_, std::try_to_lock);
-      if (not cc_mutex_lock.owns_lock()) {
-        return;
-      }
+    { std::shared_lock cc_mutex_lock(cc_mutex_);
+      if (coverage_system_ptr_ == nullptr) { return; }
       MapType global_map = coverage_system_ptr_->GetWorldMap();
       global_map_msg = EigenMatrixRowMajorToPointCloud2(global_map, 2);
     }
@@ -339,16 +291,10 @@ void CoverageControlSimCentralized::CreateSystemMapPublisher() {
   std::string topic_name = "system_map";
   system_map_pub_ = this->create_publisher<PointCloud2>(topic_name, qos_);
   auto pub_cb = [this]() -> void {
-    if (coverage_system_ptr_ == nullptr) {
-      return;
-    }
     PointCloud2 system_map_msg;
     MapType system_map;
-    {
-      std::shared_lock cc_mutex_lock(cc_mutex_, std::try_to_lock);
-      if (not cc_mutex_lock.owns_lock()) {
-        return;
-      }
+    { std::shared_lock cc_mutex_lock(cc_mutex_);
+      if (coverage_system_ptr_ == nullptr) { return; }
       system_map = coverage_system_ptr_->GetSystemMap();
     }
     system_map_msg = EigenMatrixRowMajorToPointCloud2(system_map, 2);
@@ -363,17 +309,10 @@ void CoverageControlSimCentralized::CreateExploredIDFMapPublisher() {
   global_explored_idf_map_pub_ =
       this->create_publisher<PointCloud2>(topic_name, qos_);
   auto pub_cb = [this]() -> void {
-    if (coverage_system_ptr_ == nullptr) {
-      RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-      return;
-    }
     MapType global_explored_idf_map;
     PointCloud2 global_explored_idf_map_msg;
-    {
-      std::shared_lock cc_mutex_lock(cc_mutex_, std::try_to_lock);
-      if (not cc_mutex_lock.owns_lock()) {
-        return;
-      }
+    { std::shared_lock cc_mutex_lock(cc_mutex_);
+      if (coverage_system_ptr_ == nullptr) { return; }
       global_explored_idf_map = coverage_system_ptr_->GetSystemExploredIDFMap();
     }
     global_explored_idf_map_msg =
@@ -388,16 +327,10 @@ void CoverageControlSimCentralized::CreateCoverageCostPublisher() {
   std::string topic_name = "coverage_cost";
   coverage_cost_pub_ = this->create_publisher<Float32>(topic_name, qos_);
   auto pub_cb = [this]() -> void {
-    if (coverage_system_ptr_ == nullptr) {
-      return;
-    }
     double coverage_cost = 0.0;
-    {
-      std::shared_lock lock(cc_mutex_, std::try_to_lock);
-      if (not lock.owns_lock()) {
-        return;
-      }
-      coverage_cost = coverage_system_ptr_->GetObjectiveValue();
+    { std::shared_lock lock(cc_mutex_);
+      if (coverage_system_ptr_ == nullptr) { return; }
+      coverage_cost = coverage_system_ptr_->GetObjectiveValueConst();
     }
     Float32 coverage_cost_msg;
     coverage_cost_msg.data = static_cast<float>(coverage_cost);
@@ -419,11 +352,7 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
       robot_poses_msg_.poses[i].position.x = sim_robot_positions_[i][0];
       robot_poses_msg_.poses[i].position.y = sim_robot_positions_[i][1];
     }
-    if (coverage_system_ptr_ == nullptr) {
-      return;
-    }
-    {
-      std::shared_lock lock(status_pac_mutex_);
+    { std::shared_lock lock(status_pac_mutex_);
       if (status_pac_ == 0) {
         std::unique_lock cc_lock(cc_mutex_);
         if (coverage_system_ptr_ != nullptr) {
@@ -441,15 +370,10 @@ void CoverageControlSimCentralized::CreateRobotMapPublishers() {
     robot->pubs.robot_map =
         this->create_publisher<PointCloud2>(robot->ns + "/map", qos_);
     auto pub_cb = [this, robot]() -> void {
-      if (coverage_system_ptr_ == nullptr) {
-        RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-        return;
-      }
       MapType robot_map;
       PointCloud2 msg;
-      {
-        std::shared_lock lock(cc_mutex_, std::try_to_lock);
-        if (not lock.owns_lock()) {
+      { std::shared_lock lock(cc_mutex_);
+        if (coverage_system_ptr_ == nullptr) {
           return;
         }
         robot_map = coverage_system_ptr_->GetRobotMap(robot->id);
@@ -467,18 +391,11 @@ void CoverageControlSimCentralized::CreateRobotLocalMapPublishers() {
     robot->pubs.local_map =
         this->create_publisher<PointCloud2>(robot->ns + "/local_map", qos_);
     auto pub_cb = [this, robot]() -> void {
-      if (coverage_system_ptr_ == nullptr) {
-        RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-        return;
-      }
       MapType local_map;
       PointCloud2 msg;
       Point2 pos = robot->GetWorldPose();
-      {
-        std::shared_lock lock(cc_mutex_, std::try_to_lock);
-        if (not lock.owns_lock()) {
-          return;
-        }
+      { std::shared_lock lock(cc_mutex_);
+        if (coverage_system_ptr_ == nullptr) { return; }
         local_map = coverage_system_ptr_->GetRobotLocalMap(robot->id);
       }
       msg = EigenMatrixRowMajorToPointCloud2(local_map, 2, pos[0], pos[1]);
@@ -494,18 +411,11 @@ void CoverageControlSimCentralized::CreateObstacleMapsPublisher() {
     robot->pubs.obstacle_map =
         this->create_publisher<PointCloud2>(robot->ns + "/obstacle_map", qos_);
     auto pub_cb = [this, robot]() -> void {
-      if (coverage_system_ptr_ == nullptr) {
-        RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-        return;
-      }
       MapType obstacle_map;
       PointCloud2 msg;
       Point2 pos = robot->GetWorldPose();
-      {
-        std::shared_lock lock(cc_mutex_, std::try_to_lock);
-        if (not lock.owns_lock()) {
-          return;
-        }
+      { std::shared_lock lock(cc_mutex_);
+        if (coverage_system_ptr_ == nullptr) { return; }
         obstacle_map = coverage_system_ptr_->GetRobotObstacleMap(robot->id);
       }
       msg = EigenMatrixRowMajorToPointCloud2(obstacle_map, 2, pos[0], pos[1]);
@@ -521,18 +431,11 @@ void CoverageControlSimCentralized::CreateSensorViewPublisher() {
     robot->pubs.sensor_view =
         this->create_publisher<PointCloud2>(robot->ns + "/sensor_view", qos_);
     auto pub_cb = [this, robot]() -> void {
-      if (coverage_system_ptr_ == nullptr) {
-        RCLCPP_WARN(this->get_logger(), "Coverage system not initialized");
-        return;
-      }
       MapType sensor_view;
       Point2 pos = robot->GetWorldPose();
       PointCloud2 msg;
-      {
-        std::shared_lock lock(cc_mutex_, std::try_to_lock);
-        if (not lock.owns_lock()) {
-          return;
-        }
+      { std::shared_lock lock(cc_mutex_);
+        if (coverage_system_ptr_ == nullptr) { return; }
         sensor_view = coverage_system_ptr_->GetRobotSensorView(robot->id);
       }
       msg = EigenMatrixRowMajorToPointCloud2(sensor_view, 2, pos[0], pos[1]);

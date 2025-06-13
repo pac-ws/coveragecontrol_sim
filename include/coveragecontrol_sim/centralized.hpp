@@ -88,6 +88,7 @@ struct RobotTimers {
 struct Robot {
   int id;
   std::string ns;
+  double env_scale;
   Point2 sim_pose;
   Point2 world_pose;
   PoseStamped start_pose;
@@ -99,18 +100,27 @@ struct Robot {
   RobotPubs pubs;
   RobotTimers timers;
   rclcpp::CallbackGroup::SharedPtr cbg_reentrant_;
-  Robot(int id, std::string ns)
-      : id(id), ns(ns), sim_pose(Point2::Zero()), world_pose(Point2::Zero()) {
+  Robot(int id, std::string ns, double scale)
+      : id{id}, ns{ns}, env_scale{scale}, sim_pose{Point2::Zero()}, world_pose{Point2::Zero()} {
     tf_msg.header.frame_id = "map";
     tf_msg.child_frame_id = ns;
     tf_msg.transform = IdentityTransform();
     tf_msg.transform.translation.z = 1.0;  // Set z to 1.0 for visibility
   }
 
-  void GetWorldPose(Point2 &pose) {
-    std::shared_lock lock(world_pose_mutex);
-    pose = world_pose;
+  auto PublishTransform() {
+    tf_msg.header.stamp = rclcpp::Clock().now();
+    tf_msg.transform.translation.x = sim_pose[0];
+    tf_msg.transform.translation.y = sim_pose[1];
+    return pubs.tf_broadcaster->sendTransform(tf_msg);
   }
+
+  auto Update(Point2 const &xy) {
+    SetWorldPose(xy);
+    SetSimPose(xy * env_scale);
+    return PublishTransform();
+  }
+
   Point2 GetWorldPose() {
     std::shared_lock lock(world_pose_mutex);
     return world_pose;
@@ -119,18 +129,13 @@ struct Robot {
     std::shared_lock lock(sim_pose_mutex);
     pose = sim_pose;
   }
-  Point2 GetSimPose() {
-    std::shared_lock lock(sim_pose_mutex);
-    return sim_pose;
-  }
   void SetSimPose(Point2 const &pose) {
     std::unique_lock lock(sim_pose_mutex);
     sim_pose = pose;
   }
-  void SetWorldPose(double const &x, double const &y) {
+  void SetWorldPose(Point2 const &xy) {
     std::unique_lock lock(world_pose_mutex);
-    world_pose[0] = x;
-    world_pose[1] = y;
+    world_pose = xy;
   }
 };
 
@@ -187,9 +192,11 @@ class CoverageControlSimCentralized : public rclcpp::Node {
         this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       robots_.emplace_back(
-          std::make_shared<Robot>(i, namespaces_of_robots_[i]));
+          std::make_shared<Robot>(i, namespaces_of_robots_[i], env_scale_factor_));
       robots_.back()->cbg_reentrant_ =
           this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+      robots_.back()->pubs.tf_broadcaster =
+        std::make_shared<tf2_ros::TransformBroadcaster>(this);
     }
 
     system_interval_ = std::chrono::milliseconds(
@@ -202,7 +209,6 @@ class CoverageControlSimCentralized : public rclcpp::Node {
 
     CreateRobotPoseSubscribers();
     WaitForRobotPoses();
-    CreateTFBroadcasters();
     CreateAllRobotsPosesPublisher();
 
     CreateCoverageControlSystem();
@@ -270,9 +276,19 @@ class CoverageControlSimCentralized : public rclcpp::Node {
 
   rclcpp::Service<UpdateWorldFile>::SharedPtr update_world_file_service_;
 
+  void SetIDFFile(std::string const file_name) {
+    std::unique_lock lock(idf_file_mutex_);
+    idf_file_ = file_name;
+    this->set_parameter(rclcpp::Parameter("idf_file", idf_file_));
+  }
+
+  std::string GetIDFFile() {
+    std::shared_lock lock(idf_file_mutex_);
+    return idf_file_;
+  }
+
   void InitializeParameters();
   void CreateStaticTFBroadcaster();
-  void CreateTFBroadcasters();
   void UpdateWorldFileCallback(
       const std::shared_ptr<UpdateWorldFile::Request> request,
       std::shared_ptr<UpdateWorldFile::Response> response);
