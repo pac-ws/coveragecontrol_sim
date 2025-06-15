@@ -34,30 +34,12 @@ void CoverageControlSimCentralized::CreateServiceServers() {
       "get_system_info",
       [this](const std::shared_ptr<SystemInfo::Request> request,
              std::shared_ptr<SystemInfo::Response> response) {
-        RCLCPP_INFO(this->get_logger(), "Incoming request, map_size: %d",
-                    request->map_size);
-        response->idf_file = GetIDFFile();
-        if (request->map_size != parameters_.pWorldMapSize) {
-          response->success = false;
-          RCLCPP_ERROR(this->get_logger(),
-                       "World map size does not match with the system");
-        } else {
-          response->success = true;
-          response->velocity_scale_factor = vel_scale_factor_;
-          response->namespaces = namespaces_of_robots_;
-          RCLCPP_INFO(this->get_logger(), "System Info sent");
-        }
-      });
-
-  world_file_service_ = this->create_service<WorldFile>(
-      "get_world_file",
-      [this](const std::shared_ptr<WorldFile::Request> request,
-             std::shared_ptr<WorldFile::Response> response) {
-        RCLCPP_INFO(this->get_logger(), "Incoming request for world file: %s",
+        RCLCPP_INFO(this->get_logger(), "Incoming request from %s ",
                     request->name.c_str());
-        response->success = true;
-        response->file = GetIDFFile();
-        RCLCPP_INFO(this->get_logger(), "World file sent");
+        response->idf_file = GetIDFFile();
+        response->velocity_scale_factor = vel_scale_factor_;
+        response->namespaces = namespaces_of_robots_;
+        RCLCPP_INFO(this->get_logger(), "System Info sent");
       });
 
   update_world_file_service_ = this->create_service<UpdateWorldFile>(
@@ -70,22 +52,28 @@ void CoverageControlSimCentralized::CreateServiceServers() {
         auto in_idf_file = request->file;
         if (not rcpputils::fs::is_regular_file(in_idf_file)) {
           RCLCPP_ERROR(this->get_logger(), "IDF file %s does not exist",
-                       idf_file_.c_str());
+                       in_idf_file.c_str());
           response->success = false;
           response->message = "IDF file does not exist: " + in_idf_file;
           return;
         }
-        response->success = true;
-        SetIDFFile(in_idf_file);
-        CreateCoverageControlSystem();
-        RCLCPP_INFO(this->get_logger(), "World file updated.");
+        try {
+          SetIDFFile(in_idf_file);
+          CreateCoverageControlSystem();
+          response->success = true;
+          RCLCPP_INFO(this->get_logger(), "World file updated.");
+        } catch (const std::exception& e) {
+          RCLCPP_ERROR(this->get_logger(), "Failed to update world file: %s", e.what());
+          response->success = false;
+          response->message = "Failed to create coverage system: " + std::string(e.what());
+        }
       });
   RCLCPP_INFO(this->get_logger(), "Created service servers");
 }
 
 void CoverageControlSimCentralized::CreateStatusPacSubscriber() {
   status_pac_sub_ = this->create_subscription<Int32>(
-      "pac_gcs/status_pac", qos_, [this](Int32::SharedPtr msg) {
+      "/pac_gcs/status_pac", qos_, [this](Int32::SharedPtr msg) {
         std::unique_lock lock(status_pac_mutex_);
         status_pac_ = msg->data;
       });
@@ -166,13 +154,10 @@ void CoverageControlSimCentralized::CreateCoverageControlSystem() {
     WorldIDF world_idf(parameters_, idf_file_);
     parameters_.pNumGaussianFeatures = world_idf.GetNumFeatures();
     UpdateSimRobotPositions();
-    for (Point2 pos : sim_robot_positions_) {
-      RCLCPP_INFO(this->get_logger(), "Start pose: (%f, %f)", pos[0], pos[1]);
-    }
     std::unique_lock cc_lock(cc_mutex_);
-    coverage_system_ptr_.reset();
-    coverage_system_ptr_ = std::make_shared<CoverageSystem>(
+    auto new_coverage_system = std::make_shared<CoverageSystem>(
         parameters_, world_idf, sim_robot_positions_);
+    coverage_system_ptr_ = std::move(new_coverage_system);
   } else {
     RCLCPP_ERROR(this->get_logger(), "idf_file is empty.");
     rclcpp::shutdown();
@@ -352,12 +337,15 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
       robot_poses_msg_.poses[i].position.x = sim_robot_positions_[i][0];
       robot_poses_msg_.poses[i].position.y = sim_robot_positions_[i][1];
     }
-    { std::shared_lock lock(status_pac_mutex_);
-      if (status_pac_ == 0) {
-        std::unique_lock cc_lock(cc_mutex_);
-        if (coverage_system_ptr_ != nullptr) {
-          coverage_system_ptr_->SetGlobalRobotPositions(sim_robot_positions_);
-        }
+    int current_status;
+    {
+      std::shared_lock lock(status_pac_mutex_);
+      current_status = status_pac_;
+    }
+    if (current_status == 0) {
+      std::unique_lock cc_lock(cc_mutex_);
+      if (coverage_system_ptr_ != nullptr) {
+        coverage_system_ptr_->SetGlobalRobotPositions(sim_robot_positions_);
       }
     }
     robot_poses_pub_->publish(robot_poses_msg_);

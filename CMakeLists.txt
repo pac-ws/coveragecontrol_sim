@@ -25,9 +25,11 @@ find_package(yaml-cpp REQUIRED)
 find_package(CoverageControl REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(async_pac_gnn_interfaces REQUIRED)
+find_package(rclcpp_action REQUIRED)
 
 set(target_dependencies
   rclcpp
+  rclcpp_action
   std_msgs
   geometry_msgs
   sensor_msgs
@@ -54,6 +56,22 @@ install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}/
 )
+
+add_executable(update_world_node src/update_world_node.cpp src/update_world.cpp)
+
+target_include_directories(update_world_node PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(update_world_node ${target_dependencies})
+
+target_compile_features(update_world_node PRIVATE cxx_std_17)
+
+# Install executable
+install(TARGETS update_world_node
+  DESTINATION lib/${PROJECT_NAME})
+
 add_executable(decentralized_cvt src/decentralized_cvt.cpp)
 target_include_directories(decentralized_cvt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -83,6 +101,10 @@ target_link_libraries(clairvoyant_cvt CoverageControl::CoverageControl)
 target_compile_features(clairvoyant_cvt PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 install(TARGETS clairvoyant_cvt
   DESTINATION lib/${PROJECT_NAME})
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

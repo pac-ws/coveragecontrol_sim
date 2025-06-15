@@ -8,9 +8,9 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <ament_index_cpp/get_package_prefix.hpp>
+#include <rcpputils/filesystem_helper.hpp>
 #include <async_pac_gnn_interfaces/srv/system_info.hpp>
 #include <async_pac_gnn_interfaces/srv/update_world_file.hpp>
-#include <async_pac_gnn_interfaces/srv/world_file.hpp>
 #include <async_pac_gnn_interfaces/srv/world_map.hpp>
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
@@ -42,7 +42,6 @@ using namespace CoverageControl;
 using UpdateWorldFile = async_pac_gnn_interfaces::srv::UpdateWorldFile;
 using WorldMap = async_pac_gnn_interfaces::srv::WorldMap;
 using SystemInfo = async_pac_gnn_interfaces::srv::SystemInfo;
-using WorldFile = async_pac_gnn_interfaces::srv::WorldFile;
 
 using PoseStamped = geometry_msgs::msg::PoseStamped;
 using PoseArray = geometry_msgs::msg::PoseArray;
@@ -149,7 +148,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   std::vector<std::string> namespaces_of_robots_;
   PointVector sim_robot_positions_;
   Parameters parameters_;
-  int status_pac_ = 0;
+  int status_pac_ = 2;  // Start in stopped state
   double time_step_ = 0.1;
   int buffer_size_ = 10;
   double env_scale_factor_;
@@ -271,8 +270,6 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   rclcpp::Service<WorldMap>::SharedPtr world_map_service_;
 
   rclcpp::Service<SystemInfo>::SharedPtr system_info_service_;
-
-  rclcpp::Service<WorldFile>::SharedPtr world_file_service_;
 
   rclcpp::Service<UpdateWorldFile>::SharedPtr update_world_file_service_;
 
