@@ -98,7 +98,10 @@ void UpdateWorld::execute_update_world(
 void UpdateWorld::check_robot_status(
     const std::shared_ptr<GoalHandleUpdateWorldFile> goal_handle) {
   if (!goal_handle->is_active()) {
-    status_timer_->cancel();
+    if (status_timer_) {
+      status_timer_->cancel();
+      status_timer_.reset();
+    }
     return;
   }
 
@@ -163,7 +166,10 @@ void UpdateWorld::check_robot_status(
   goal_handle->publish_feedback(feedback);
 
   if (num_completed >= num_ns_ || timed_out) {
-    status_timer_->cancel();
+    if (status_timer_) {
+      status_timer_->cancel();
+      status_timer_.reset();
+    }
 
     result->success = (num_success == num_ns_);
     result->message = error_message;
