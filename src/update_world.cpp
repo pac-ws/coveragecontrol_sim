@@ -44,7 +44,19 @@ void UpdateWorld::execute_update_world(
   auto result = std::make_shared<UpdateWorldFileAction::Result>();
 
   current_goal_handle_ = goal_handle;
-  start_time_ = std::chrono::steady_clock::now();
+  // Lambda function for error message construction and logging
+  auto create_error_msg = [this](const std::string& ns, const std::string& message) -> std::string {
+    std::string error_msg = "[Error: " + ns + " ] " + message + "\n";
+    RCLCPP_ERROR(this->get_logger(), "%s", error_msg.c_str());
+    return error_msg;
+  };
+
+  // Initialize persistent feedback data
+  num_success_ = 0;
+  num_completed_ = 0;
+  completed_namespaces_.clear();
+  failed_namespaces_.clear();
+  persistent_error_message_.clear();
 
   std::vector<std::string> namespaces = goal->namespaces;
   namespaces.insert(namespaces.begin(), "sim");
@@ -63,32 +75,36 @@ void UpdateWorld::execute_update_world(
     robot->client = this->create_client<UpdateWorldFile>(robot->service_name);
   }
 
-  std::string error_message;
   std::string file = goal->file;
 
-  for (auto& robot : robots_) {
+  // Use iterator for safe removal during iteration
+  for (auto it = robots_.begin(); it != robots_.end();) {
+    auto& robot = *it;
     if (!robot->client->wait_for_service(service_timeout_s_)) {
-      error_message += "[Error: " + robot->ns + " ] service not available\n";
-      robot->status = false;
-      feedback->failed_namespaces.push_back(robot->ns);
+      // Add to persistent error message and failed namespaces
+      persistent_error_message_ += create_error_msg(robot->ns, "service not available");
+      failed_namespaces_.push_back(robot->ns);
+      num_completed_++;
+      
+      // Remove robot from active list
+      it = robots_.erase(it);
     } else {
       auto robot_request = std::make_shared<UpdateWorldFile::Request>();
       robot_request->file = file;
 
-      auto cb =
-          [robot](rclcpp::Client<UpdateWorldFile>::SharedFutureWithRequest) {
-            robot->call_success.store(true);
-          };
-
-      robot->fut =
-          robot->client->async_send_request(robot_request, std::move(cb));
+      robot->fut = robot->client->async_send_request(robot_request);
+      ++it;
     }
   }
 
   feedback->robots_total = num_ns_;
-  feedback->robots_completed = 0;
-  feedback->message = "Requests sent to all robots, waiting for responses...";
+  feedback->robots_completed = num_completed_;
+  feedback->completed_namespaces = completed_namespaces_;
+  feedback->failed_namespaces = failed_namespaces_;
+  feedback->message = persistent_error_message_;
+  feedback->message += "Requests sent. Waiting responses...";
   goal_handle->publish_feedback(feedback);
+  start_time_ = std::chrono::steady_clock::now();
 
   status_timer_ = this->create_wall_timer(
       std::chrono::milliseconds(100),
@@ -105,85 +121,130 @@ void UpdateWorld::check_robot_status(
     return;
   }
 
+  // Early termination if no robots left to check
+  if (robots_.empty()) {
+    if (status_timer_) {
+      status_timer_->cancel();
+      status_timer_.reset();
+    }
+    
+    auto result = std::make_shared<UpdateWorldFileAction::Result>();
+    result->success = (num_success_ == num_ns_);
+    result->message = persistent_error_message_;
+    result->message += "UpdateWorld: " + std::to_string(num_success_) + " of " +
+                       std::to_string(num_ns_) + "\n";
+    result->num_success = num_success_;
+    result->num_total = num_ns_;
+
+    auto elapsed_time = std::chrono::steady_clock::now() - start_time_;
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time).count();
+    
+    if (result->success) {
+      RCLCPP_INFO(this->get_logger(), 
+                  "UpdateWorld action completed successfully! Updated %zu/%zu robots in %ld ms (early termination)",
+                  num_success_, num_ns_, elapsed_ms);
+      goal_handle->succeed(result);
+    } else {
+      RCLCPP_ERROR(this->get_logger(), 
+                   "UpdateWorld action completed with failures! Success: %zu/%zu robots in %ld ms (early termination)\n%s",
+                   num_success_, num_ns_, elapsed_ms, persistent_error_message_.c_str());
+      goal_handle->succeed(result);
+    }
+    
+    current_goal_handle_.reset();
+    return;
+  }
+
   auto feedback = std::make_shared<UpdateWorldFileAction::Feedback>();
   auto result = std::make_shared<UpdateWorldFileAction::Result>();
 
-  std::string error_message;
-  size_t num_success = 0;
-  size_t num_completed = 0;
-
-  feedback->completed_namespaces.clear();
-  feedback->failed_namespaces.clear();
+  // Lambda function for error message construction and logging
+  auto create_error_msg = [this](const std::string& ns, const std::string& message) -> std::string {
+    std::string error_msg = "[Error: " + ns + " ] " + message + "\n";
+    RCLCPP_ERROR(this->get_logger(), "%s", error_msg.c_str());
+    return error_msg;
+  };
 
   auto elapsed = std::chrono::steady_clock::now() - start_time_;
   auto timeout_duration =
       std::chrono::nanoseconds(future_timeout_s_.nanoseconds());
   bool timed_out = elapsed >= timeout_duration;
 
-  for (auto& robot : robots_) {
-    if (robot->status == false) {
-      feedback->failed_namespaces.push_back(robot->ns);
-      num_completed++;
-      continue;
+  // Use iterator for safe removal during iteration
+  for (auto it = robots_.begin(); it != robots_.end();) {
+    auto& robot = *it;
+    bool remove_robot = false;
+
+    // Check if future is ready (regardless of call_success flag)
+    if (robot->fut.has_value() && 
+        robot->fut->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      try {
+        auto robot_response = robot->fut->get();
+        if (robot_response->success) {
+          completed_namespaces_.push_back(robot->ns);
+          num_success_++;
+        } else {
+          failed_namespaces_.push_back(robot->ns);
+          persistent_error_message_ += create_error_msg(robot->ns, robot_response->message);
+        }
+      } catch (const std::exception& e) {
+        failed_namespaces_.push_back(robot->ns);
+        persistent_error_message_ += create_error_msg(robot->ns, "exception: " + std::string(e.what()));
+      }
+      num_completed_++;
+      remove_robot = true;
+    } else if (timed_out) {
+      failed_namespaces_.push_back(robot->ns);
+      persistent_error_message_ += create_error_msg(robot->ns, "timeout");
+      num_completed_++;
+      remove_robot = true;
     }
 
-    if (robot->call_success.load()) {
-      if (robot->fut.has_value()) {
-        try {
-          auto request_response_pair = robot->fut->future.get();
-          auto robot_response = request_response_pair.second;
-          if (robot_response->success) {
-            feedback->completed_namespaces.push_back(robot->ns);
-            num_success++;
-          } else {
-            feedback->failed_namespaces.push_back(robot->ns);
-            error_message +=
-                "[Error: " + robot->ns + " ] " + robot_response->message + "\n";
-          }
-        } catch (const std::exception& e) {
-          feedback->failed_namespaces.push_back(robot->ns);
-          error_message += "[Error: " + robot->ns +
-                           " ] exception: " + std::string(e.what()) + "\n";
-        }
-      } else {
-        feedback->failed_namespaces.push_back(robot->ns);
-        error_message += "[Error: " + robot->ns + " ] no future available\n";
-      }
-      num_completed++;
-    } else if (timed_out) {
-      feedback->failed_namespaces.push_back(robot->ns);
-      error_message += "[Error: " + robot->ns + " ] timeout\n";
-      num_completed++;
+    if (remove_robot) {
+      it = robots_.erase(it);
+    } else {
+      ++it;
     }
   }
 
+  // Update feedback with persistent data
   feedback->robots_total = num_ns_;
-  feedback->robots_completed = num_completed;
-  feedback->message = "Completed: " + std::to_string(num_completed) + "/" +
+  feedback->robots_completed = num_completed_;
+  feedback->completed_namespaces = completed_namespaces_;
+  feedback->failed_namespaces = failed_namespaces_;
+  feedback->message = "Completed: " + std::to_string(num_completed_) + "/" +
                       std::to_string(num_ns_) +
-                      " (Success: " + std::to_string(num_success) + ")";
+                      " (Success: " + std::to_string(num_success_) + ")";
+  feedback->message += persistent_error_message_;
 
   goal_handle->publish_feedback(feedback);
 
-  if (num_completed >= num_ns_ || timed_out) {
+  // Check if all robots are completed or timed out
+  if (num_completed_ >= num_ns_ || timed_out) {
     if (status_timer_) {
       status_timer_->cancel();
       status_timer_.reset();
     }
 
-    result->success = (num_success == num_ns_);
-    result->message = error_message;
-    result->message += "UpdateWorld: " + std::to_string(num_success) + " of " +
+    result->success = (num_success_ == num_ns_);
+    result->message = persistent_error_message_;
+    result->message += "UpdateWorld: " + std::to_string(num_success_) + " of " +
                        std::to_string(num_ns_) + "\n";
-    result->num_success = num_success;
+    result->num_success = num_success_;
     result->num_total = num_ns_;
 
+    auto elapsed_time = std::chrono::steady_clock::now() - start_time_;
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time).count();
+    
     if (result->success) {
-      RCLCPP_INFO(this->get_logger(), "Successfully updated all worlds");
+      RCLCPP_INFO(this->get_logger(), 
+                  "UpdateWorld action completed successfully! Updated %zu/%zu robots in %ld ms",
+                  num_success_, num_ns_, elapsed_ms);
       goal_handle->succeed(result);
     } else {
-      RCLCPP_ERROR(this->get_logger(), "Failed to update all worlds\n%s",
-                   error_message.c_str());
+      RCLCPP_ERROR(this->get_logger(), 
+                   "UpdateWorld action completed with failures! Success: %zu/%zu robots in %ld ms\n%s",
+                   num_success_, num_ns_, elapsed_ms, persistent_error_message_.c_str());
       goal_handle->succeed(result);
     }
 
