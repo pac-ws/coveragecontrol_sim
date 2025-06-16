@@ -12,6 +12,7 @@
 #include <async_pac_gnn_interfaces/srv/system_info.hpp>
 #include <async_pac_gnn_interfaces/srv/update_world_file.hpp>
 #include <async_pac_gnn_interfaces/srv/world_map.hpp>
+#include <async_pac_gnn_interfaces/msg/robot_positions.hpp>
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
 #include <functional>
@@ -42,6 +43,7 @@ using namespace CoverageControl;
 using UpdateWorldFile = async_pac_gnn_interfaces::srv::UpdateWorldFile;
 using WorldMap = async_pac_gnn_interfaces::srv::WorldMap;
 using SystemInfo = async_pac_gnn_interfaces::srv::SystemInfo;
+using RobotPositions = async_pac_gnn_interfaces::msg::RobotPositions;
 
 using PoseStamped = geometry_msgs::msg::PoseStamped;
 using PoseArray = geometry_msgs::msg::PoseArray;
@@ -156,6 +158,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   double pose_timeout_ = 30.0;
 
   PoseArray robot_poses_msg_;
+  RobotPositions robot_positions_msg_;
   geometry_msgs::msg::TransformStamped tf_map_idf_static_msg_;
 
   std::chrono::milliseconds short_interval_{30};
@@ -183,6 +186,11 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       robot_poses_msg_.poses.push_back(XYtoPose(0.0, 0.0));
     }
+    
+    // Initialize efficient robot positions message
+    robot_positions_msg_.header.frame_id = "map";
+    robot_positions_msg_.header.stamp = this->now();
+    robot_positions_msg_.positions.resize(parameters_.pNumRobots * 2, 0.0f);
     sim_robot_positions_ = PointVector(parameters_.pNumRobots, Point2::Zero());
     zero_world_map_ = ZeroSquareMap(parameters_.pWorldMapSize);
     cbg_reentrant_ =
@@ -208,7 +216,8 @@ class CoverageControlSimCentralized : public rclcpp::Node {
 
     CreateRobotPoseSubscribers();
     WaitForRobotPoses();
-    CreateAllRobotsPosesPublisher();
+    // CreateAllRobotsPosesPublisher();
+    CreateRobotPositionsPublisher();
 
     CreateCoverageControlSystem();
     /* CreateWorldMapServiceServer(); */
@@ -250,6 +259,10 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   // Publisher for robot poses
   rclcpp::Publisher<PoseArray>::SharedPtr robot_poses_pub_;
   rclcpp::TimerBase::SharedPtr robot_poses_pub_timer_;
+  
+  // Publisher for robot positions (efficient message)
+  rclcpp::Publisher<RobotPositions>::SharedPtr robot_positions_pub_;
+  rclcpp::TimerBase::SharedPtr robot_positions_pub_timer_;
 
   // Publisher for global map
   rclcpp::Publisher<PointCloud2>::SharedPtr global_map_pub_;
@@ -299,6 +312,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   void UpdateSimRobotPositions();
 
   void CreateAllRobotsPosesPublisher();
+  void CreateRobotPositionsPublisher();
 
   void CreateRobotSimPosPublishers();
 

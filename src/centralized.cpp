@@ -353,6 +353,36 @@ void CoverageControlSimCentralized::CreateAllRobotsPosesPublisher() {
   robot_poses_pub_timer_ = this->create_wall_timer(short_interval_, pub_cb);
 }
 
+void CoverageControlSimCentralized::CreateRobotPositionsPublisher() {
+  robot_positions_pub_ =
+      this->create_publisher<RobotPositions>("all_robot_positions", qos_);
+  auto pub_cb = [this]() -> void {
+    robot_positions_msg_.header.stamp = this->now();
+
+    UpdateSimRobotPositions();
+
+    // Fill flattened positions array efficiently
+    for (int i = 0; i < parameters_.pNumRobots; ++i) {
+      robot_positions_msg_.positions[i * 2] = static_cast<float>(sim_robot_positions_[i][0]);
+      robot_positions_msg_.positions[i * 2 + 1] = static_cast<float>(sim_robot_positions_[i][1]);
+    }
+    
+    int current_status;
+    {
+      std::shared_lock lock(status_pac_mutex_);
+      current_status = status_pac_;
+    }
+    if (current_status == 0) {
+      std::unique_lock cc_lock(cc_mutex_);
+      if (coverage_system_ptr_ != nullptr) {
+        coverage_system_ptr_->SetGlobalRobotPositions(sim_robot_positions_);
+      }
+    }
+    robot_positions_pub_->publish(robot_positions_msg_);
+  };
+  robot_positions_pub_timer_ = this->create_wall_timer(short_interval_, pub_cb);
+}
+
 void CoverageControlSimCentralized::CreateRobotMapPublishers() {
   for (auto robot : robots_) {
     robot->pubs.robot_map =
