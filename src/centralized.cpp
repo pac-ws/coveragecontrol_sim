@@ -38,6 +38,7 @@ void CoverageControlSimCentralized::CreateServiceServers() {
                     request->name.c_str());
         response->idf_file = GetIDFFile();
         response->velocity_scale_factor = vel_scale_factor_;
+        response->env_scale_factor = env_scale_factor_;
         response->namespaces = namespaces_of_robots_;
         RCLCPP_INFO(this->get_logger(), "System Info sent");
       });
