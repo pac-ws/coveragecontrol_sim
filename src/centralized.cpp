@@ -36,6 +36,7 @@ void CoverageControlSimCentralized::CreateServiceServers() {
              std::shared_ptr<SystemInfo::Response> response) {
         RCLCPP_INFO(this->get_logger(), "Incoming request from %s ",
                     request->name.c_str());
+        response->world_size = static_cast<float>(parameters_.pWorldMapSize);
         response->idf_file = GetIDFFile();
         response->velocity_scale_factor = vel_scale_factor_;
         response->env_scale_factor = env_scale_factor_;
