@@ -18,8 +18,8 @@ rclcpp_action::GoalResponse UpdateWorld::HandleGoal(
     const rclcpp_action::GoalUUID& uuid,
     std::shared_ptr<const UpdateWorldFileAction::Goal> goal) {
   RCLCPP_INFO(this->get_logger(),
-              "Received goal request for file: %s with %zu namespaces",
-              goal->file.c_str(), goal->namespaces.size());
+              "Received goal request for file: %s",
+              goal->file.c_str());
   (void)uuid;
   return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
@@ -43,7 +43,18 @@ void UpdateWorld::ExecuteUpdateWorld(
   auto feedback = std::make_shared<UpdateWorldFileAction::Feedback>();
   auto result = std::make_shared<UpdateWorldFileAction::Result>();
 
-  std::vector<std::string> namespaces = goal->namespaces;
+  std::vector<std::string> namespaces = GetNamespaces();
+  if (namespaces.empty()) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to get robot namespaces, aborting action");
+    auto result = std::make_shared<UpdateWorldFileAction::Result>();
+    result->success = false;
+    result->message = "Failed to retrieve robot namespaces";
+    result->num_success = 0;
+    result->num_total = 0;
+    goal_handle->abort(result);
+    return;
+  }
+  
   namespaces.insert(namespaces.begin(), "sim");
   num_ns_ = namespaces.size();
 
@@ -122,6 +133,34 @@ void UpdateWorld::PublishResult(
     
     goal_handle.reset();
     ResetSystem();
+}
+
+std::vector<std::string> UpdateWorld::GetNamespaces() {
+  namespaces_client_ = this->create_client<NamespacesRobots>("get_namespaces_robots");
+  
+  if (!namespaces_client_->wait_for_service(std::chrono::seconds(5))) {
+    RCLCPP_ERROR(this->get_logger(), "get_namespaces_robots service not available");
+    return {};
+  }
+
+  auto request = std::make_shared<NamespacesRobots::Request>();
+  
+  try {
+    auto future = namespaces_client_->async_send_request(request);
+    if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), future) != 
+        rclcpp::FutureReturnCode::SUCCESS) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to call get_namespaces_robots service");
+      return {};
+    }
+    
+    auto response = future.get();
+    RCLCPP_INFO(this->get_logger(), "Retrieved %zu robot namespaces", response->namespaces.size());
+    return response->namespaces;
+    
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(this->get_logger(), "Exception calling get_namespaces_robots: %s", e.what());
+    return {};
+  }
 }
 
 void UpdateWorld::CheckRobotStatus(

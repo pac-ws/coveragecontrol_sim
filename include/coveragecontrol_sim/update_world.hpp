@@ -3,6 +3,7 @@
 
 #include <async_pac_gnn_interfaces/action/update_world_file.hpp>
 #include <async_pac_gnn_interfaces/srv/update_world_file.hpp>
+#include <async_pac_gnn_interfaces/srv/namespaces_robots.hpp>
 #include <future>
 #include <list>
 #include <memory>
@@ -18,6 +19,7 @@ class UpdateWorld : public rclcpp::Node {
       async_pac_gnn_interfaces::action::UpdateWorldFile;
   using GoalHandleUpdateWorldFile =
       rclcpp_action::ServerGoalHandle<UpdateWorldFileAction>;
+  using NamespacesRobots = async_pac_gnn_interfaces::srv::NamespacesRobots;
 
  public:
   UpdateWorld(const rclcpp::NodeOptions& options);
@@ -54,6 +56,8 @@ class UpdateWorld : public rclcpp::Node {
   void PublishResult(
     std::shared_ptr<GoalHandleUpdateWorldFile> goal_handle);
 
+  std::vector<std::string> GetNamespaces();
+
   rclcpp_action::Server<UpdateWorldFileAction>::SharedPtr action_server_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   std::list<std::shared_ptr<Robot>> robots_;
@@ -72,6 +76,8 @@ class UpdateWorld : public rclcpp::Node {
       rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_sensor_data_.history,
                                             qos_profile_sensor_data_.depth),
                   qos_profile_sensor_data_);
+
+  rclcpp::Client<NamespacesRobots>::SharedPtr namespaces_client_;
 
   void ResetSystem() {
     for (auto robot : robots_) {

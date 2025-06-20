@@ -8,15 +8,14 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <ament_index_cpp/get_package_prefix.hpp>
-#include <rcpputils/filesystem_helper.hpp>
+#include <async_pac_gnn_interfaces/msg/robot_positions.hpp>
+#include <async_pac_gnn_interfaces/srv/namespaces_robots.hpp>
 #include <async_pac_gnn_interfaces/srv/system_info.hpp>
 #include <async_pac_gnn_interfaces/srv/update_world_file.hpp>
 #include <async_pac_gnn_interfaces/srv/world_map.hpp>
-#include <async_pac_gnn_interfaces/msg/robot_positions.hpp>
 #include <chrono>
 #include <coveragecontrol_sim/utils.hpp>
 #include <functional>
-#include <future>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -25,6 +24,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/wait_for_message.hpp>
+#include <rcpputils/filesystem_helper.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32.hpp>
@@ -43,6 +43,7 @@ using namespace CoverageControl;
 using UpdateWorldFile = async_pac_gnn_interfaces::srv::UpdateWorldFile;
 using WorldMap = async_pac_gnn_interfaces::srv::WorldMap;
 using SystemInfo = async_pac_gnn_interfaces::srv::SystemInfo;
+using NamespacesRobots = async_pac_gnn_interfaces::srv::NamespacesRobots;
 using RobotPositions = async_pac_gnn_interfaces::msg::RobotPositions;
 
 using PoseStamped = geometry_msgs::msg::PoseStamped;
@@ -90,19 +91,20 @@ struct Robot {
   int id;
   std::string ns;
   double env_scale;
-  Point2 sim_pose;
-  Point2 world_pose;
+  Point2 sim_pose{std::nan(""), std::nan("")};
+  Point2 world_pose{std::nan(""), std::nan("")};
   PoseStamped start_pose;
   geometry_msgs::msg::TransformStamped tf_msg;
   rclcpp::Time last_pose_time;
   std::shared_mutex sim_pose_mutex;
   std::shared_mutex world_pose_mutex;
+  bool valid_world_pose = false;
   RobotSubs subs;
   RobotPubs pubs;
   RobotTimers timers;
   rclcpp::CallbackGroup::SharedPtr cbg_reentrant_;
   Robot(int id, std::string ns, double scale)
-      : id{id}, ns{ns}, env_scale{scale}, sim_pose{Point2::Zero()}, world_pose{Point2::Zero()} {
+      : id{id}, ns{ns}, env_scale{scale} {
     tf_msg.header.frame_id = "map";
     tf_msg.child_frame_id = ns;
     tf_msg.transform = IdentityTransform();
@@ -166,9 +168,15 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   std::chrono::milliseconds system_interval_{200};
   std::chrono::milliseconds vlong_interval{2000};
 
-  std::vector<std::shared_ptr<Robot>> robots_;
+  rclcpp::Clock::SharedPtr clock_;
+  rclcpp::Time start_time_;
+
+  std::list<std::shared_ptr<Robot>> robots_;
+  int successful_poses_ = 0;
 
   std::string params_file_, idf_file_;
+
+  int state_ = 0;
 
   Float32MultiArray zero_world_map_;  // Zero world map for service responses
 
@@ -186,7 +194,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
       robot_poses_msg_.poses.push_back(XYtoPose(0.0, 0.0));
     }
-    
+
     // Initialize efficient robot positions message
     robot_positions_msg_.header.frame_id = "map";
     robot_positions_msg_.header.stamp = this->now();
@@ -198,51 +206,28 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     cbg_service_ =
         this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     for (int i = 0; i < parameters_.pNumRobots; ++i) {
-      robots_.emplace_back(
-          std::make_shared<Robot>(i, namespaces_of_robots_[i], env_scale_factor_));
+      robots_.emplace_back(std::make_shared<Robot>(i, namespaces_of_robots_[i],
+                                                   env_scale_factor_));
       robots_.back()->cbg_reentrant_ =
           this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
       robots_.back()->pubs.tf_broadcaster =
-        std::make_shared<tf2_ros::TransformBroadcaster>(this);
+          std::make_shared<tf2_ros::TransformBroadcaster>(this);
     }
 
     system_interval_ = std::chrono::milliseconds(
         static_cast<int>(parameters_.pTimeStep * 1000));
 
-    CreateStaticTFBroadcaster();
-    CreateServiceServers();
+    clock_ = std::make_shared<rclcpp::Clock>();
+    start_time_ = clock_->now();
 
-    CreateStatusPacSubscriber();
-
-    CreateRobotPoseSubscribers();
-    WaitForRobotPoses();
-    // CreateAllRobotsPosesPublisher();
-    CreateRobotPositionsPublisher();
-
-    CreateCoverageControlSystem();
-    /* CreateWorldMapServiceServer(); */
-
-    /* CreateRobotSimPosPublishers(); */
-
-    /* CreateRobotMapPublishers(); */
-    /* CreateRobotLocalMapPublishers(); */
-    /* CreateObstacleMapsPublisher(); */
-
-    CreateSystemMapPublisher();
-    CreateGlobalMapPublisher();
-    /* CreateExploredIDFMapPublisher(); */
-    /* CreateSensorViewPublisher(); */
-
-    /* CreateNeighborsPosPublisher(); */
-    /* CreateNeighborsIDPublisher(); */
-
-    /* CreateCoverageCostPublisher(); */
+    initialization_timer_ = this->create_wall_timer(
+        short_interval_,
+        std::bind(&CoverageControlSimCentralized::InitializeCB, this));
   }
 
   Parameters const &GetParameters() { return parameters_; }
 
  private:
-
   rmw_qos_profile_t qos_profile_sensor_data_ = rmw_qos_profile_sensor_data;
   rclcpp::QoS qos_ =
       rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_sensor_data_.history,
@@ -259,7 +244,7 @@ class CoverageControlSimCentralized : public rclcpp::Node {
   // Publisher for robot poses
   rclcpp::Publisher<PoseArray>::SharedPtr robot_poses_pub_;
   rclcpp::TimerBase::SharedPtr robot_poses_pub_timer_;
-  
+
   // Publisher for robot positions (efficient message)
   rclcpp::Publisher<RobotPositions>::SharedPtr robot_positions_pub_;
   rclcpp::TimerBase::SharedPtr robot_positions_pub_timer_;
@@ -286,6 +271,10 @@ class CoverageControlSimCentralized : public rclcpp::Node {
 
   rclcpp::Service<UpdateWorldFile>::SharedPtr update_world_file_service_;
 
+  rclcpp::Service<NamespacesRobots>::SharedPtr namespaces_robots_service_;
+
+  rclcpp::TimerBase::SharedPtr initialization_timer_;
+
   void SetIDFFile(std::string const file_name) {
     std::unique_lock lock(idf_file_mutex_);
     idf_file_ = file_name;
@@ -297,16 +286,18 @@ class CoverageControlSimCentralized : public rclcpp::Node {
     return idf_file_;
   }
 
+  void InitializeCB();
   void InitializeParameters();
   void CreateStaticTFBroadcaster();
   void UpdateWorldFileCallback(
       const std::shared_ptr<UpdateWorldFile::Request> request,
       std::shared_ptr<UpdateWorldFile::Response> response);
   void CreateWorldMapServiceServer();
-  void CreateServiceServers();
+  void CreateSystemInfoServiceServer();
+  void CreateUpdateWorldFileServiceServer();
+  void CreateNamespacesRobotsServiceServer();
   void CreateStatusPacSubscriber();
   void CreateRobotPoseSubscribers();
-  void WaitForRobotPoses();
 
   void CreateCoverageControlSystem();
   void UpdateSimRobotPositions();
